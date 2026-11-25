@@ -1,12 +1,12 @@
 -- ============================================================================
--- ANIME ADVENTURES (UPD 21.5+) - UNIFIED AUTO-FARM, MACRO RECORDER & MODERN UI
+-- ANIME ADVENTURES (UPD 21.5+) - UNIFIED AUTO-FARM & CONSOLIDATED MACRO PANEL
 -- Save as 'AA_Unified.lua' in your executor's 'autoexec' and 'workspace' folders.
 -- ============================================================================
 
 repeat task.wait() until game:IsLoaded()
 
 if getgenv().AA_Loaded then
-    warn("[AA_Unified] Already loaded! Re-executing UI...")
+    warn("[AA_Unified] Re-executing UI & updating loops...")
 end
 getgenv().AA_Loaded = true
 
@@ -24,6 +24,8 @@ end
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 
@@ -107,36 +109,101 @@ end
 getgenv().AAConfig = LoadConfig()
 SaveConfig(getgenv().AAConfig)
 
--- 4. ANTI-AFK & NON-BLOCKING REMOTE DISPATCHER
+-- 4. SAFE GUI CLICKER (FIRESIGNAL + VIRTUALINPUTMANAGER FALLBACK)
+local function ClickGuiButton(btn)
+    if not btn or not btn:IsA("GuiButton") or not btn.Visible then return false end
+
+    local clicked = false
+    if firesignal then
+        pcall(function()
+            firesignal(btn.MouseButton1Click)
+            clicked = true
+        end)
+        pcall(function()
+            firesignal(btn.Activated)
+            clicked = true
+        end)
+        pcall(function()
+            firesignal(btn.MouseButton1Down)
+            firesignal(btn.MouseButton1Up)
+        end)
+    end
+
+    if VirtualInputManager then
+        pcall(function()
+            local inset = GuiService:GetGuiInset()
+            local pos = btn.AbsolutePosition
+            local size = btn.AbsoluteSize
+            local cx = pos.X + (size.X / 2)
+            local cy = pos.Y + (size.Y / 2) + inset.Y
+            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+            task.wait(0.03)
+            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+            clicked = true
+        end)
+    end
+
+    return clicked
+end
+
+-- 5. ANTI-AFK & FUZZY REMOTE DISPATCHER
 LocalPlayer.Idled:Connect(function()
     VirtualUser:CaptureController()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
 local RemoteCache = {}
-local function GetRemotesFolder()
-    local endpoints = ReplicatedStorage:FindFirstChild("endpoints")
-    if endpoints then
-        return endpoints:FindFirstChild("client_to_server") or endpoints
-    end
-    return ReplicatedStorage
-end
+local DiscoveredRemotes = {}
 
-local function FindRemote(remoteName)
-    if RemoteCache[remoteName] and RemoteCache[remoteName].Parent then
-        return RemoteCache[remoteName]
+local function IndexAllRemotes()
+    table.clear(DiscoveredRemotes)
+    for _, desc in ipairs(ReplicatedStorage:GetDescendants()) do
+        if desc:IsA("RemoteEvent") or desc:IsA("RemoteFunction") then
+            table.insert(DiscoveredRemotes, desc)
+        end
     end
-    local folder = GetRemotesFolder()
-    local remote = folder:FindFirstChild(remoteName, true) or ReplicatedStorage:FindFirstChild(remoteName, true)
-    if remote and (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) then
-        RemoteCache[remoteName] = remote
-        return remote
+end
+IndexAllRemotes()
+
+ReplicatedStorage.DescendantAdded:Connect(function(desc)
+    if desc:IsA("RemoteEvent") or desc:IsA("RemoteFunction") then
+        table.insert(DiscoveredRemotes, desc)
     end
+end)
+
+local function FindRemote(remoteNameOrPatterns)
+    local patterns = type(remoteNameOrPatterns) == "table" and remoteNameOrPatterns or { remoteNameOrPatterns }
+    local cacheKey = patterns[1]
+
+    if RemoteCache[cacheKey] and RemoteCache[cacheKey].Parent then
+        return RemoteCache[cacheKey]
+    end
+
+    for _, pat in ipairs(patterns) do
+        local lowerPat = pat:lower()
+        for _, r in ipairs(DiscoveredRemotes) do
+            if r.Parent and r.Name:lower() == lowerPat then
+                RemoteCache[cacheKey] = r
+                return r
+            end
+        end
+    end
+
+    for _, pat in ipairs(patterns) do
+        local lowerPat = pat:lower()
+        for _, r in ipairs(DiscoveredRemotes) do
+            if r.Parent and r.Name:lower():find(lowerPat, 1, true) then
+                RemoteCache[cacheKey] = r
+                return r
+            end
+        end
+    end
+
     return nil
 end
 
-local function FireEndpoint(remoteName, ...)
-    local remote = FindRemote(remoteName)
+local function FireEndpoint(remoteNameOrPatterns, ...)
+    local remote = FindRemote(remoteNameOrPatterns)
     if not remote then return nil end
     local args = {...}
     local ok, res = pcall(function()
@@ -149,7 +216,22 @@ local function FireEndpoint(remoteName, ...)
     return ok and res or nil
 end
 
--- 5. MODULE: MACRO RECORDER, STORAGE & PLAYBACK ENGINE
+-- 6. STATE DETECTION (LOBBY VS MATCH)
+local function IsInLobby()
+    if workspace:FindFirstChild("_lobby") or workspace:FindFirstChild("Lobby") then
+        return true
+    end
+    local wavesObj = workspace:FindFirstChild("_waves") or workspace:FindFirstChild("_wave")
+    if wavesObj then
+        return false
+    end
+    if PlayerGui and (PlayerGui:FindFirstChild("SpawnUnitUI", true) or PlayerGui:FindFirstChild("WaveUI", true)) then
+        return false
+    end
+    return true
+end
+
+-- 7. MODULE: MACRO RECORDER, STORAGE & PLAYBACK ENGINE
 local MacroState = {
     IsRecording = false,
     RecordStartTime = 0,
@@ -199,32 +281,31 @@ local function LoadMacroFile(name)
     return {}, 0
 end
 
-local function GetOwnedUnitIndex(unitObj)
-    local activeUnits = workspace:FindFirstChild("_units")
-    if not activeUnits then return 1 end
-    local idx = 0
+local function GetOwnedUnitsList()
+    local list = {}
+    local activeUnits = workspace:FindFirstChild("_units") or workspace:FindFirstChild("Units")
+    if not activeUnits then return list end
+
     for _, u in ipairs(activeUnits:GetChildren()) do
-        local owner = u:FindFirstChild("_stats") and u._stats:FindFirstChild("player")
-        if owner and owner.Value == LocalPlayer then
-            idx = idx + 1
-            if u == unitObj then return idx end
+        local uStats = u:FindFirstChild("_stats") or u:FindFirstChild("Stats")
+        local owner = uStats and (uStats:FindFirstChild("player") or uStats:FindFirstChild("Owner"))
+        local ownerAttr = u:GetAttribute("Owner") or u:GetAttribute("Player")
+        if (owner and owner.Value == LocalPlayer) or (ownerAttr and tostring(ownerAttr) == LocalPlayer.Name) then
+            table.insert(list, u)
         end
+    end
+    return list
+end
+
+local function GetOwnedUnitIndex(unitObj)
+    for i, u in ipairs(GetOwnedUnitsList()) do
+        if u == unitObj then return i end
     end
     return 1
 end
 
 local function GetOwnedUnitByIndex(targetIdx)
-    local activeUnits = workspace:FindFirstChild("_units")
-    if not activeUnits then return nil end
-    local idx = 0
-    for _, u in ipairs(activeUnits:GetChildren()) do
-        local owner = u:FindFirstChild("_stats") and u._stats:FindFirstChild("player")
-        if owner and owner.Value == LocalPlayer then
-            idx = idx + 1
-            if idx == targetIdx then return u end
-        end
-    end
-    return nil
+    return GetOwnedUnitsList()[targetIdx]
 end
 
 local function InstallMacroHook()
@@ -238,10 +319,10 @@ local function InstallMacroHook()
 
             if MacroState.IsRecording and not checkcaller() and (method == "FireServer" or method == "InvokeServer") then
                 if typeof(self) == "Instance" and self:IsDescendantOf(ReplicatedStorage) then
-                    local rName = self.Name
+                    local rName = self.Name:lower()
                     local elapsed = os.clock() - MacroState.RecordStartTime
 
-                    if rName == "spawn_unit" and typeof(args[2]) == "CFrame" then
+                    if (rName:find("spawn") or rName:find("place")) and typeof(args[2]) == "CFrame" then
                         local cf = args[2]
                         table.insert(MacroState.RecordedSteps, {
                             time = elapsed,
@@ -249,13 +330,13 @@ local function InstallMacroHook()
                             unitId = tostring(args[1]),
                             pos = { cf.X, cf.Y, cf.Z }
                         })
-                    elseif rName == "upgrade_unit_ingame" and typeof(args[1]) == "Instance" then
+                    elseif rName:find("upgrade") and typeof(args[1]) == "Instance" then
                         table.insert(MacroState.RecordedSteps, {
                             time = elapsed,
                             action = "upgrade_unit_ingame",
                             unitIndex = GetOwnedUnitIndex(args[1])
                         })
-                    elseif rName == "sell_unit" and typeof(args[1]) == "Instance" then
+                    elseif rName:find("sell") and typeof(args[1]) == "Instance" then
                         table.insert(MacroState.RecordedSteps, {
                             time = elapsed,
                             action = "sell_unit",
@@ -276,15 +357,14 @@ local function InstallMacroHook()
     end
 end
 
--- Fallback workspace unit listener if executor blocks hookmetamethod
 local function AttachWorkspaceFallbackRecorder()
-    local activeUnits = workspace:FindFirstChild("_units")
+    local activeUnits = workspace:FindFirstChild("_units") or workspace:FindFirstChild("Units")
     if not activeUnits then return end
 
     activeUnits.ChildAdded:Connect(function(unit)
         if not MacroState.IsRecording or MacroState.HookInstalled then return end
         task.wait(0.15)
-        local uStats = unit:FindFirstChild("_stats")
+        local uStats = unit:FindFirstChild("_stats") or unit:FindFirstChild("Stats")
         local owner = uStats and uStats:FindFirstChild("player")
         if owner and owner.Value == LocalPlayer then
             local pos = unit:GetPivot().Position
@@ -320,6 +400,24 @@ local function ResetMacroPlayback()
     MacroState.CurrentStepIndex = 1
 end
 
+local function StartMacroPlaybackNow()
+    local cfg = getgenv().AAConfig
+    if MacroState.IsRecording then
+        StopMacroRecording()
+    end
+    cfg.PlacementMode = "Macro"
+    SaveConfig(cfg)
+    ResetMacroPlayback()
+    local steps = LoadMacroFile(cfg.ActiveMacroName)
+    if #steps > 0 then
+        MacroState.IsPlaying = true
+        MacroState.PlaybackStartTime = os.clock()
+        MacroState.CurrentStepIndex = 1
+        return true, #steps
+    end
+    return false, 0
+end
+
 local function StepMacroPlayback()
     if MacroState.IsRecording then return end
 
@@ -338,13 +436,13 @@ local function StepMacroPlayback()
         if elapsed >= (step.time or 0) then
             if step.action == "spawn_unit" and step.pos then
                 local cf = CFrame.new(step.pos[1], step.pos[2], step.pos[3])
-                FireEndpoint("spawn_unit", step.unitId, cf)
+                FireEndpoint({"spawn_unit", "place_unit"}, step.unitId, cf)
             elseif step.action == "upgrade_unit_ingame" then
                 local unitObj = GetOwnedUnitByIndex(step.unitIndex or 1)
-                if unitObj then FireEndpoint("upgrade_unit_ingame", unitObj) end
+                if unitObj then FireEndpoint({"upgrade_unit_ingame", "upgrade_unit"}, unitObj) end
             elseif step.action == "sell_unit" then
                 local unitObj = GetOwnedUnitByIndex(step.unitIndex or 1)
-                if unitObj then FireEndpoint("sell_unit", unitObj) end
+                if unitObj then FireEndpoint({"sell_unit", "sell"}, unitObj) end
             end
             MacroState.CurrentStepIndex = MacroState.CurrentStepIndex + 1
         else
@@ -353,7 +451,7 @@ local function StepMacroPlayback()
     end
 end
 
--- 6. MODULE: MATCH REWARDS TRACKER, PORTAL DETECTOR & DISCORD WEBHOOKS
+-- 8. MODULE: MATCH REWARDS TRACKER, PORTAL DETECTOR & DISCORD WEBHOOKS
 local MatchTracker = {
     SnapshotTaken = false,
     WebhookSentThisMatch = false,
@@ -364,7 +462,7 @@ local MatchTracker = {
 }
 
 local function ReadPlayerCurrencies()
-    local stats = LocalPlayer:FindFirstChild("_stats")
+    local stats = LocalPlayer:FindFirstChild("_stats") or LocalPlayer:FindFirstChild("Stats")
     local result = { Gems = 0, SummerPearls = 0, DawnCoins = 0, Gold = 0 }
     if not stats then return result end
 
@@ -386,7 +484,7 @@ local function ReadPlayerCurrencies()
 end
 
 local function ReadPlayerItemCounts()
-    local stats = LocalPlayer:FindFirstChild("_stats")
+    local stats = LocalPlayer:FindFirstChild("_stats") or LocalPlayer:FindFirstChild("Stats")
     local counts = {}
     if not stats then return counts end
 
@@ -457,7 +555,7 @@ local function GetMatchRewardsReport()
         end
     end
 
-    local resultsGui = PlayerGui and PlayerGui:FindFirstChild("ResultsUI")
+    local resultsGui = PlayerGui and (PlayerGui:FindFirstChild("ResultsUI") or PlayerGui:FindFirstChild("EndScreen"))
     local waveText = "Completed"
     if resultsGui then
         for _, lbl in ipairs(resultsGui:GetDescendants()) do
@@ -537,7 +635,7 @@ local function SendMatchEndWebhook(forceTest)
     return true
 end
 
--- 7. MODULE: LIVE BANNER SCANNER & BANNER WEBHOOK
+-- 9. MODULE: LIVE BANNER SCANNER & BANNER WEBHOOK
 local function GetCurrentBannerUnits()
     local foundUnits = {}
     local seen = {}
@@ -584,7 +682,7 @@ local function GetCurrentBannerUnits()
 end
 
 local function HasTargetUnitInInventory(targetName, targetRarity)
-    local stats = LocalPlayer:FindFirstChild("_stats")
+    local stats = LocalPlayer:FindFirstChild("_stats") or LocalPlayer:FindFirstChild("Stats")
     local ownedUnits = stats and (stats:FindFirstChild("units") or stats:FindFirstChild("inventory"))
     if not ownedUnits then return false end
 
@@ -678,7 +776,7 @@ local function SendBannerWebhook(forceTest)
             color = targetFound and 16729344 or 3447003,
             fields = {
                 { name = "Target Unit", value = string.format("%s (%s)", cfg.TargetBannerUnit, cfg.TargetBannerRarity), inline = true },
-                { name = "Location", value = workspace:FindFirstChild("_lobby") and "Lobby" or "In Match", inline = true }
+                { name = "Location", value = IsInLobby() and "Lobby" or "In Match", inline = true }
             },
             footer = { text = "Anime Adventures Auto-Checker • " .. os.date("%X") }
         }}
@@ -696,7 +794,7 @@ local function SendBannerWebhook(forceTest)
     return true
 end
 
--- 8. MODULE: MODERN STYLED UI (CYAN / VIOLET / EMERALD DARK THEME)
+-- 10. MODULE: MODERN STYLED UI (CYAN / VIOLET / EMERALD DARK THEME)
 local ActivityLabelRef = nil
 local UnitCountLabelRef = nil
 local MacroStatusLabelRef = nil
@@ -714,6 +812,7 @@ local function CreateStyledControlGui()
     local COL_VIOLET    = Color3.fromRGB(138, 92, 246)
     local COL_EMERALD   = Color3.fromRGB(16, 185, 129)
     local COL_RED       = Color3.fromRGB(239, 68, 68)
+    local COL_AMBER     = Color3.fromRGB(245, 158, 11)
     local COL_TEXT_MAIN = Color3.fromRGB(240, 244, 250)
     local COL_TEXT_DIM  = Color3.fromRGB(150, 160, 180)
 
@@ -958,7 +1057,7 @@ local function CreateStyledControlGui()
         end)
     end
 
-    local function AddDropdownCycle(parent, labelText, configKey, options)
+    local function AddDropdownCycle(parent, labelText, configKey, options, onChanged)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, -4, 0, 34)
         row.BackgroundColor3 = COL_CARD
@@ -1005,7 +1104,10 @@ local function CreateStyledControlGui()
             cfg[configKey] = options[(idx % #options) + 1]
             SaveConfig(cfg)
             Refresh()
+            if onChanged then onChanged(cfg[configKey]) end
         end)
+
+        return Refresh
     end
 
     local function AddStyledInput(parent, labelText, configKey, isNumber)
@@ -1066,77 +1168,142 @@ local function CreateStyledControlGui()
     AddPillToggle(tabMain, "Summer: Vote Tsunami (2x)", "SummerVoteTsunami")
     AddPillToggle(tabMain, "Summer: +30% Pearl Cards", "AutoPickModifierCard")
 
-    -- TAB 2: PLACEMENT & MACRO RECORDER
+    -- TAB 2: PLACEMENT & CONSOLIDATED MACRO STUDIO
     local tabPlace = CreateTab("Placement")
-    AddDropdownCycle(tabPlace, "Placement Mode:", "PlacementMode", {"Percentage", "Macro"})
-    AddStyledInput(tabPlace, "Macro File Name:", "ActiveMacroName", false)
+    local refreshPlacementMode = AddDropdownCycle(tabPlace, "Placement Mode:", "PlacementMode", {"Percentage", "Macro"})
+
+    -- UNIFIED MACRO STUDIO CARD (ALL CONTROLS IN ONE AREA)
+    local macroCard = Instance.new("Frame")
+    macroCard.Name = "MacroStudioCard"
+    macroCard.Size = UDim2.new(1, -4, 0, 134)
+    macroCard.BackgroundColor3 = COL_CARD
+    macroCard.Parent = tabPlace
+    Instance.new("UICorner", macroCard).CornerRadius = UDim.new(0, 10)
+    local macroCardStroke = Instance.new("UIStroke", macroCard)
+    macroCardStroke.Color = COL_VIOLET
+    macroCardStroke.Thickness = 1.2
+    macroCardStroke.Transparency = 0.25
+
+    local macroHeader = Instance.new("TextLabel")
+    macroHeader.Size = UDim2.new(0.52, 0, 0, 24)
+    macroHeader.Position = UDim2.new(0, 12, 0, 6)
+    macroHeader.BackgroundTransparency = 1
+    macroHeader.Font = Enum.Font.GothamBold
+    macroHeader.TextSize = 12
+    macroHeader.TextColor3 = COL_CYAN
+    macroHeader.TextXAlignment = Enum.TextXAlignment.Left
+    macroHeader.Text = "MACRO STUDIO"
+    macroHeader.Parent = macroCard
+
+    local macroNameBox = Instance.new("TextBox")
+    macroNameBox.Size = UDim2.new(0.44, -12, 0, 22)
+    macroNameBox.Position = UDim2.new(0.56, 0, 0, 7)
+    macroNameBox.BackgroundColor3 = COL_INPUT
+    macroNameBox.Font = Enum.Font.GothamSemibold
+    macroNameBox.TextSize = 11
+    macroNameBox.TextColor3 = COL_TEXT_MAIN
+    macroNameBox.PlaceholderText = "Macro Name..."
+    macroNameBox.ClearTextOnFocus = false
+    macroNameBox.Text = tostring(cfg.ActiveMacroName)
+    macroNameBox.Parent = macroCard
+    Instance.new("UICorner", macroNameBox).CornerRadius = UDim.new(0, 6)
+    local mnStroke = Instance.new("UIStroke", macroNameBox)
+    mnStroke.Color = Color3.fromRGB(48, 65, 88)
+    mnStroke.Thickness = 1
 
     local macroStatusBox = Instance.new("TextLabel")
-    macroStatusBox.Size = UDim2.new(1, -4, 0, 34)
+    macroStatusBox.Size = UDim2.new(1, -20, 0, 26)
+    macroStatusBox.Position = UDim2.new(0, 10, 0, 34)
     macroStatusBox.BackgroundColor3 = COL_INPUT
-    macroStatusBox.Font = Enum.Font.GothamBold
+    macroStatusBox.Font = Enum.Font.GothamSemibold
     macroStatusBox.TextSize = 11
-    macroStatusBox.TextColor3 = COL_CYAN
-    macroStatusBox.Text = "⏹ Macro Idle — Ready to Record or Play"
-    macroStatusBox.Parent = tabPlace
-    Instance.new("UICorner", macroStatusBox).CornerRadius = UDim.new(0, 8)
+    macroStatusBox.TextColor3 = COL_TEXT_DIM
+    macroStatusBox.Parent = macroCard
+    Instance.new("UICorner", macroStatusBox).CornerRadius = UDim.new(0, 6)
     local mStroke = Instance.new("UIStroke", macroStatusBox)
-    mStroke.Color = Color3.fromRGB(48, 65, 88)
+    mStroke.Color = Color3.fromRGB(42, 50, 66)
     mStroke.Thickness = 1
     MacroStatusLabelRef = macroStatusBox
 
-    local recRow = Instance.new("Frame")
-    recRow.Size = UDim2.new(1, -4, 0, 30)
-    recRow.BackgroundTransparency = 1
-    recRow.Parent = tabPlace
+    local function UpdateIdleMacroStatus()
+        local steps, dur = LoadMacroFile(cfg.ActiveMacroName)
+        if #steps > 0 then
+            macroStatusBox.TextColor3 = COL_CYAN
+            macroStatusBox.Text = string.format("Ready: '%s' (%d actions | %s)", cfg.ActiveMacroName, #steps, FormatTimer(dur))
+        else
+            macroStatusBox.TextColor3 = COL_TEXT_DIM
+            macroStatusBox.Text = string.format("Empty: '%s' — Press Record to capture", cfg.ActiveMacroName)
+        end
+    end
+    UpdateIdleMacroStatus()
 
-    local startRecBtn = Instance.new("TextButton")
-    startRecBtn.Size = UDim2.new(0.32, 0, 1, 0)
-    startRecBtn.BackgroundColor3 = COL_RED
-    startRecBtn.Font = Enum.Font.GothamBold
-    startRecBtn.TextSize = 11
-    startRecBtn.TextColor3 = Color3.new(1, 1, 1)
-    startRecBtn.Text = "● Start Rec"
-    startRecBtn.Parent = recRow
-    Instance.new("UICorner", startRecBtn).CornerRadius = UDim.new(0, 6)
+    macroNameBox.FocusLost:Connect(function()
+        local clean = macroNameBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+        if clean == "" then clean = "Default" end
+        cfg.ActiveMacroName = clean
+        macroNameBox.Text = clean
+        SaveConfig(cfg)
+        UpdateIdleMacroStatus()
+    end)
 
-    local stopRecBtn = Instance.new("TextButton")
-    stopRecBtn.Size = UDim2.new(0.32, 0, 1, 0)
-    stopRecBtn.Position = UDim2.new(0.34, 0, 0, 0)
-    stopRecBtn.BackgroundColor3 = COL_EMERALD
-    stopRecBtn.Font = Enum.Font.GothamBold
-    stopRecBtn.TextSize = 11
-    stopRecBtn.TextColor3 = Color3.new(1, 1, 1)
-    stopRecBtn.Text = "■ Stop & Save"
-    stopRecBtn.Parent = recRow
-    Instance.new("UICorner", stopRecBtn).CornerRadius = UDim.new(0, 6)
+    -- 2x2 BUTTON GRID INSIDE MACRO STUDIO (START/USE, RECORD, SAVE, CLEAR)
+    local gridContainer = Instance.new("Frame")
+    gridContainer.Size = UDim2.new(1, -20, 0, 62)
+    gridContainer.Position = UDim2.new(0, 10, 0, 65)
+    gridContainer.BackgroundTransparency = 1
+    gridContainer.Parent = macroCard
 
-    local clearRecBtn = Instance.new("TextButton")
-    clearRecBtn.Size = UDim2.new(0.32, 0, 1, 0)
-    clearRecBtn.Position = UDim2.new(0.68, 0, 0, 0)
-    clearRecBtn.BackgroundColor3 = COL_VIOLET
-    clearRecBtn.Font = Enum.Font.GothamBold
-    clearRecBtn.TextSize = 11
-    clearRecBtn.TextColor3 = Color3.new(1, 1, 1)
-    clearRecBtn.Text = "Clear Macro"
-    clearRecBtn.Parent = recRow
-    Instance.new("UICorner", clearRecBtn).CornerRadius = UDim.new(0, 6)
+    local function MakeMacroBtn(text, bgColor, posX, posY, sizeX, sizeY)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(sizeX, -3, 0, sizeY)
+        b.Position = UDim2.new(posX, posX > 0 and 3 or 0, 0, posY)
+        b.BackgroundColor3 = bgColor
+        b.Font = Enum.Font.GothamBold
+        b.TextSize = 11
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.Text = text
+        b.Parent = gridContainer
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+        return b
+    end
 
-    startRecBtn.MouseButton1Click:Connect(function()
+    local btnStartUse = MakeMacroBtn("▶ Start / Use Macro", COL_CYAN,    0.00, 0,  0.50, 28)
+    btnStartUse.TextColor3 = Color3.fromRGB(12, 16, 22)
+    local btnRecord   = MakeMacroBtn("● Record",          COL_RED,     0.50, 0,  0.50, 28)
+    local btnSave     = MakeMacroBtn("✔ Save Macro",      COL_EMERALD, 0.00, 33, 0.50, 28)
+    local btnClear    = MakeMacroBtn("🗑 Clear Macro",     COL_VIOLET,  0.50, 33, 0.50, 28)
+
+    btnStartUse.MouseButton1Click:Connect(function()
+        local started, count = StartMacroPlaybackNow()
+        refreshPlacementMode()
+        if started then
+            macroStatusBox.TextColor3 = COL_CYAN
+            macroStatusBox.Text = string.format("▶ Playing '%s' (%d actions)...", cfg.ActiveMacroName, count)
+        else
+            macroStatusBox.TextColor3 = COL_AMBER
+            macroStatusBox.Text = string.format("Mode set to Macro, but '%s' has 0 actions!", cfg.ActiveMacroName)
+        end
+    end)
+
+    btnRecord.MouseButton1Click:Connect(function()
         StartMacroRecording()
         macroStatusBox.TextColor3 = COL_RED
         macroStatusBox.Text = "● RECORDING [00:00.0] — Place/Upgrade units now!"
     end)
 
-    stopRecBtn.MouseButton1Click:Connect(function()
-        local count = #MacroState.RecordedSteps
-        local dur = FormatTimer(os.clock() - MacroState.RecordStartTime)
-        StopMacroRecording()
+    btnSave.MouseButton1Click:Connect(function()
+        local count = MacroState.IsRecording and #MacroState.RecordedSteps or #LoadMacroFile(cfg.ActiveMacroName)
+        local dur = MacroState.IsRecording and (os.clock() - MacroState.RecordStartTime) or 0
+        if MacroState.IsRecording then
+            StopMacroRecording()
+        else
+            SaveMacroFile(cfg.ActiveMacroName, LoadMacroFile(cfg.ActiveMacroName))
+        end
         macroStatusBox.TextColor3 = COL_EMERALD
-        macroStatusBox.Text = string.format("✔ Saved %d actions (%s) to %s", count, dur, cfg.ActiveMacroName)
+        macroStatusBox.Text = string.format("✔ Saved '%s' (%d actions | %s)", cfg.ActiveMacroName, count, FormatTimer(dur))
     end)
 
-    clearRecBtn.MouseButton1Click:Connect(function()
+    btnClear.MouseButton1Click:Connect(function()
         MacroState.IsRecording = false
         MacroState.RecordedSteps = {}
         ResetMacroPlayback()
@@ -1250,77 +1417,130 @@ end
 
 CreateStyledControlGui()
 
--- 9. MODULE: CAPTCHA SOLVER (UPD 21.5 NUMERIC CODE + LEGACY IMAGE GRID)
-local function SolveCaptcha()
-    if not getgenv().AAConfig.CaptchaBypass or not PlayerGui then return false end
+-- 11. MODULE: CAPTCHA SOLVER (MULTI-ROOT SCAN, RICHTEXT STRIP, NUMERIC/TEXT + GRID)
+local function StripRichText(str)
+    return tostring(str or ""):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
 
-    local captchaGui = PlayerGui:FindFirstChild("CaptchaGui") or PlayerGui:FindFirstChild("Verification")
-    if not captchaGui then
-        for _, gui in ipairs(PlayerGui:GetChildren()) do
-            if gui:IsA("ScreenGui") and gui.Enabled and gui:FindFirstChild("Submit", true) then
-                captchaGui = gui
-                break
+local function IsGuiVisibleInTree(inst)
+    local curr = inst
+    while curr and curr ~= game do
+        if curr:IsA("ScreenGui") and not curr.Enabled then return false end
+        if curr:IsA("GuiObject") and not curr.Visible then return false end
+        curr = curr.Parent
+    end
+    return true
+end
+
+local function FindActiveCaptchaContainer()
+    local roots = { PlayerGui, CoreGui }
+    for _, root in ipairs(roots) do
+        if root then
+            for _, gui in ipairs(root:GetChildren()) do
+                if gui:IsA("ScreenGui") and gui.Enabled and gui.Name ~= "AAModernHubUI" then
+                    local gName = gui.Name:lower()
+                    if gName:find("captcha") or gName:find("verify") or gName:find("verification") or gName:find("security") or gName:find("bot") then
+                        return gui
+                    end
+                    local hasBox, hasConfirm = false, false
+                    for _, desc in ipairs(gui:GetDescendants()) do
+                        if desc:IsA("TextBox") and IsGuiVisibleInTree(desc) then
+                            hasBox = true
+                        elseif desc:IsA("GuiButton") and IsGuiVisibleInTree(desc) then
+                            local bn = (desc.Name .. " " .. (desc:IsA("TextButton") and desc.Text or "")):lower()
+                            if bn:find("submit") or bn:find("verify") or bn:find("confirm") then
+                                hasConfirm = true
+                            end
+                        end
+                    end
+                    if hasBox and hasConfirm then
+                        return gui
+                    end
+                end
             end
         end
     end
-    if not (captchaGui and captchaGui.Enabled) then return false end
+    return nil
+end
+
+local function SolveCaptcha()
+    if not getgenv().AAConfig.CaptchaBypass then return false end
+
+    local captchaGui = FindActiveCaptchaContainer()
+    if not captchaGui then return false end
 
     local codeText = nil
     local inputBox = nil
     local submitBtn = nil
+    local promptText = ""
 
     for _, obj in ipairs(captchaGui:GetDescendants()) do
-        if obj:IsA("TextLabel") and obj.Visible then
-            local digits = obj.Text:gsub("%s+", "")
-            if digits:match("^%d%d%d%d+$") then
-                codeText = digits
+        if obj:IsA("TextLabel") and IsGuiVisibleInTree(obj) then
+            local raw = StripRichText(obj.Text)
+            local lower = raw:lower()
+            local compact = raw:gsub("%s+", "")
+
+            if lower:find("select") or lower:find("click") or lower:find("enter") or lower:find("type") then
+                promptText = lower
             end
-        elseif obj:IsA("TextBox") and obj.Visible then
+
+            if compact:match("^%d%d%d%d+$") then
+                codeText = compact
+            elseif not codeText and #compact >= 4 and #compact <= 7 and compact:match("^[A-Za-z0-9]+$") then
+                if lower ~= "submit" and lower ~= "verify" and lower ~= "confirm" and lower ~= "captcha" then
+                    codeText = compact
+                end
+            end
+        elseif obj:IsA("TextBox") and IsGuiVisibleInTree(obj) then
             inputBox = obj
-        elseif obj:IsA("GuiButton") and obj.Visible then
-            local n = (obj.Name .. " " .. (obj:IsA("TextButton") and obj.Text or "")):lower()
-            if n:find("submit") then
+        elseif obj:IsA("GuiButton") and IsGuiVisibleInTree(obj) then
+            local n = (obj.Name .. " " .. (obj:IsA("TextButton") and StripRichText(obj.Text) or "")):lower()
+            if n:find("submit") or n:find("verify") or n:find("confirm") then
                 submitBtn = obj
             end
         end
     end
 
     if codeText and inputBox then
+        inputBox:CaptureFocus()
+        task.wait(0.05)
         inputBox.Text = codeText
-        task.wait(0.25)
-        if submitBtn and firesignal then
-            pcall(function() firesignal(submitBtn.MouseButton1Click) end)
-            pcall(function() firesignal(submitBtn.Activated) end)
+        task.wait(0.1)
+        inputBox:ReleaseFocus(true)
+        task.wait(0.15)
+
+        if submitBtn then
+            ClickGuiButton(submitBtn)
         end
+        FireEndpoint({"submit_captcha", "verify_captcha", "captcha"}, codeText)
         task.wait(0.5)
         return true
     end
 
-    local promptLabel = captchaGui:FindFirstChild("Prompt", true)
-    local targetKeyword = promptLabel and promptLabel.Text:lower() or ""
-
-    for _, obj in ipairs(captchaGui:GetDescendants()) do
-        if obj:IsA("ImageButton") and obj.Visible then
-            local tag = tostring(obj:GetAttribute("Category") or obj.Name):lower()
-            if targetKeyword ~= "" and targetKeyword:find(tag, 1, true) then
-                if firesignal then pcall(function() firesignal(obj.MouseButton1Click) end) end
-                task.wait(0.25)
+    if promptText ~= "" then
+        for _, obj in ipairs(captchaGui:GetDescendants()) do
+            if obj:IsA("ImageButton") and IsGuiVisibleInTree(obj) then
+                local tag = tostring(obj:GetAttribute("Category") or obj:GetAttribute("Type") or obj.Name):lower()
+                if tag ~= "" and promptText:find(tag, 1, true) then
+                    ClickGuiButton(obj)
+                    task.wait(0.2)
+                end
             end
         end
+        if submitBtn then
+            task.wait(0.25)
+            ClickGuiButton(submitBtn)
+        end
+        return true
     end
 
-    if submitBtn and firesignal then
-        task.wait(0.3)
-        pcall(function() firesignal(submitBtn.MouseButton1Click) end)
-    end
-
-    return true
+    return false
 end
 
--- 10. MODULE: AUTO-SUMMON & CURRENCY CHECK
+-- 12. MODULE: AUTO-SUMMON & CURRENCY CHECK
 local function HasEnoughCurrencyForRoll()
     local cfg = getgenv().AAConfig
-    local stats = LocalPlayer:FindFirstChild("_stats")
+    local stats = LocalPlayer:FindFirstChild("_stats") or LocalPlayer:FindFirstChild("Stats")
     if not stats then return false end
 
     if cfg.TargetBannerType == "MistyVillage" then
@@ -1341,17 +1561,18 @@ local function RunBannerRoutine()
     if not IsTargetUnitOnBanner() then return false end
     if not HasEnoughCurrencyForRoll() then return false end
 
-    local summonZone = workspace:FindFirstChild("_lobby") and workspace._lobby:FindFirstChild("summon", true)
+    local lobbyFolder = workspace:FindFirstChild("_lobby") or workspace:FindFirstChild("Lobby")
+    local summonZone = lobbyFolder and lobbyFolder:FindFirstChild("summon", true)
     if summonZone and summonZone:IsA("BasePart") and LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
         local dist = (LocalPlayer.Character.PrimaryPart.Position - summonZone.Position).Magnitude
         if dist > 15 then
-            LocalPlayer.Character:SetPrimaryPartCFrame(summonZone.CFrame + Vector3.new(0, 3, 0))
+            LocalPlayer.Character:PivotTo(summonZone.CFrame + Vector3.new(0, 3, 0))
             task.wait(0.5)
         end
     end
 
     local rollType = cfg.SummonMulti and "multi" or "single"
-    FireEndpoint("request_summon", cfg.TargetBannerType, rollType)
+    FireEndpoint({"request_summon", "summon"}, cfg.TargetBannerType, rollType)
     task.wait(1.5)
 
     if HasTargetUnitInInventory(cfg.TargetBannerUnit, cfg.TargetBannerRarity) then
@@ -1363,7 +1584,23 @@ local function RunBannerRoutine()
     return true
 end
 
--- 11. MODULE: LOBBY & MATCHMAKING (STORY / SUMMER / MISTY / PARTY)
+-- 13. MODULE: LOBBY & MATCHMAKING (PHYSICAL WALK/PIVOT + REMOTE FALLBACK)
+local function MoveToLobbyPod(podKeyword)
+    local lobbyFolder = workspace:FindFirstChild("_lobby") or workspace:FindFirstChild("Lobby")
+    if not lobbyFolder or not LocalPlayer.Character then return end
+
+    local needle = podKeyword:lower()
+    for _, obj in ipairs(lobbyFolder:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name:lower():find(needle, 1, true) then
+            local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp and (hrp.Position - obj.Position).Magnitude > 8 then
+                LocalPlayer.Character:PivotTo(obj.CFrame + Vector3.new(0, 3, 0))
+            end
+            return
+        end
+    end
+end
+
 local function RunLobbyRoutine()
     if SolveCaptcha() then return end
     if RunBannerRoutine() then return end
@@ -1373,24 +1610,28 @@ local function RunLobbyRoutine()
 
     if mode == "Story" then
         local levelId = string.format("%s_level_%s", cfg.StoryWorld, cfg.StoryAct)
-        FireEndpoint("request_join_lobby", cfg.StoryPod)
-        task.wait(0.6)
-        FireEndpoint("request_match_making", cfg.StoryPod, levelId, true, cfg.StoryDifficulty)
-        task.wait(0.6)
-        FireEndpoint("request_start_game", cfg.StoryPod)
+        MoveToLobbyPod(cfg.StoryPod)
+        FireEndpoint({"request_join_lobby", "join_lobby"}, cfg.StoryPod)
+        task.wait(0.5)
+        FireEndpoint({"request_match_making", "match_making"}, cfg.StoryPod, levelId, true, cfg.StoryDifficulty)
+        task.wait(0.5)
+        FireEndpoint({"request_start_game", "start_game"}, cfg.StoryPod)
 
     elseif mode == "SummerEvent" then
-        FireEndpoint("request_join_lobby", "SummerEvent_Pod_1")
-        task.wait(1)
-        FireEndpoint("request_start_game", "SummerEvent_Pod_1")
+        MoveToLobbyPod("Summer")
+        FireEndpoint({"request_join_lobby", "join_lobby"}, "SummerEvent_Pod_1")
+        task.wait(0.6)
+        FireEndpoint({"request_start_game", "start_game"}, "SummerEvent_Pod_1")
 
     elseif mode == "MistyVillage" then
-        FireEndpoint("request_join_lobby", "MistyVillage_Pod_1")
-        task.wait(1)
-        FireEndpoint("request_start_game", "MistyVillage_Pod_1")
+        MoveToLobbyPod("Misty")
+        FireEndpoint({"request_join_lobby", "join_lobby"}, "MistyVillage_Pod_1")
+        task.wait(0.6)
+        FireEndpoint({"request_start_game", "start_game"}, "MistyVillage_Pod_1")
 
     elseif mode == "InfinityCastle" then
-        FireEndpoint("request_start_infinity_castle")
+        MoveToLobbyPod("Infinity")
+        FireEndpoint({"request_start_infinity_castle", "infinity_castle"})
 
     elseif mode == "PartyJoin" then
         local partyGui = PlayerGui and PlayerGui:FindFirstChild("PartyFinder", true)
@@ -1399,8 +1640,8 @@ local function RunLobbyRoutine()
         for _, label in ipairs(partyGui:GetDescendants()) do
             if label:IsA("TextLabel") and label.Text:find(cfg.TargetPartyName, 1, true) then
                 local joinBtn = label.Parent and label.Parent:FindFirstChild("JoinButton")
-                if joinBtn and joinBtn:IsA("GuiButton") and firesignal then
-                    pcall(function() firesignal(joinBtn.MouseButton1Click) end)
+                if joinBtn and joinBtn:IsA("GuiButton") then
+                    ClickGuiButton(joinBtn)
                     break
                 end
             end
@@ -1408,10 +1649,10 @@ local function RunLobbyRoutine()
     end
 end
 
--- 12. MODULE: DYNAMIC PERCENTAGE PATH CALCULATOR (0% TO 100%)
+-- 14. MODULE: DYNAMIC PERCENTAGE PATH CALCULATOR (0% TO 100%)
 local function GetOrderedWaypoints()
-    local map = workspace:FindFirstChild("_map")
-    local wpFolder = map and map:FindFirstChild("waypoints")
+    local map = workspace:FindFirstChild("_map") or workspace:FindFirstChild("Map")
+    local wpFolder = map and (map:FindFirstChild("waypoints") or map:FindFirstChild("Waypoints") or map:FindFirstChild("Path"))
     if not wpFolder then return {} end
 
     local ordered = {}
@@ -1428,7 +1669,11 @@ local function GetOrderedWaypoints()
 
     if #ordered == 0 then
         local children = wpFolder:GetChildren()
-        table.sort(children, function(a, b) return a.Name < b.Name end)
+        table.sort(children, function(a, b)
+            local na, nb = tonumber(a.Name), tonumber(b.Name)
+            if na and nb then return na < nb end
+            return a.Name < b.Name
+        end)
         for _, child in ipairs(children) do
             if child:IsA("BasePart") then
                 table.insert(ordered, child.Position)
@@ -1480,7 +1725,7 @@ local function GetPointAtLanePercentage(percent)
 end
 
 local function GetSortedHillsNear(targetPos)
-    local map = workspace:FindFirstChild("_map")
+    local map = workspace:FindFirstChild("_map") or workspace:FindFirstChild("Map")
     local hills = {}
     if not map then return hills end
 
@@ -1497,7 +1742,44 @@ local function GetSortedHillsNear(targetPos)
     return hills
 end
 
--- 13. MODULE: UNIT PLACEMENT (MACRO OR PERCENTAGE) & UPDATE 21.5 AUTO-UPGRADE
+-- 15. MODULE: EQUIPPED UNITS RESOLVER (STATS OR HOTBAR GUI FALLBACK)
+local function GetEquippedUnitSlots()
+    local slots = {}
+    local stats = LocalPlayer:FindFirstChild("_stats") or LocalPlayer:FindFirstChild("Stats")
+    local equipped = stats and (stats:FindFirstChild("equipped_units") or stats:FindFirstChild("EquippedUnits"))
+
+    if equipped and #equipped:GetChildren() > 0 then
+        for _, unitVal in ipairs(equipped:GetChildren()) do
+            local uid = (unitVal:IsA("StringValue") or unitVal:IsA("IntValue")) and unitVal.Value
+                or unitVal:GetAttribute("UnitId") or unitVal:GetAttribute("Id") or unitVal.Name
+            local pType = tostring(unitVal:GetAttribute("PlacementType") or "Ground"):lower()
+            if uid and tostring(uid) ~= "" then
+                table.insert(slots, { id = uid, placementType = pType })
+            end
+        end
+    end
+
+    if #slots == 0 and PlayerGui then
+        local hotbar = PlayerGui:FindFirstChild("SpawnUnitUI", true) or PlayerGui:FindFirstChild("Hotbar", true)
+        if hotbar then
+            for _, btn in ipairs(hotbar:GetDescendants()) do
+                if btn:IsA("GuiButton") and btn.Visible then
+                    local uid = btn:GetAttribute("UnitId") or btn:GetAttribute("Unit")
+                    if uid and tostring(uid) ~= "" then
+                        table.insert(slots, {
+                            id = uid,
+                            placementType = tostring(btn:GetAttribute("PlacementType") or "Ground"):lower()
+                        })
+                    end
+                end
+            end
+        end
+    end
+
+    return slots
+end
+
+-- 16. MODULE: UNIT PLACEMENT (MACRO OR PERCENTAGE) & UPDATE 21.5 AUTO-UPGRADE
 local nativeUpgradeEnabled = false
 
 local function RunUnitRoutine()
@@ -1509,22 +1791,18 @@ local function RunUnitRoutine()
     end
 
     if cfg.AutoPlace and not MacroState.IsRecording then
-        local stats = LocalPlayer:FindFirstChild("_stats")
-        local equipped = stats and stats:FindFirstChild("equipped_units")
-        if equipped then
-            local units = equipped:GetChildren()
+        local slots = GetEquippedUnitSlots()
+        if #slots > 0 then
             local anchorCenter, _ = GetPointAtLanePercentage(cfg.LanePercent)
             local nearbyHills = GetSortedHillsNear(anchorCenter)
 
-            for i, unitVal in ipairs(units) do
-                local slotOffsetPct = ((i - 1) - (#units - 1) / 2) * cfg.SlotPercentSpread
+            for i, slot in ipairs(slots) do
+                local slotOffsetPct = ((i - 1) - (#slots - 1) / 2) * cfg.SlotPercentSpread
                 local slotPct = math.clamp(cfg.LanePercent + slotOffsetPct, 0.02, 0.98)
                 local lanePos, laneDir = GetPointAtLanePercentage(slotPct)
 
-                local placementType = tostring(unitVal:GetAttribute("PlacementType") or "Ground"):lower()
                 local finalPos
-
-                if (placementType == "hill" or placementType == "hybrid") and #nearbyHills > 0 then
+                if (slot.placementType == "hill" or slot.placementType == "hybrid") and #nearbyHills > 0 then
                     finalPos = nearbyHills[((i - 1) % #nearbyHills) + 1]
                 else
                     local sideSign = (i % 2 == 0) and 1 or -1
@@ -1532,7 +1810,7 @@ local function RunUnitRoutine()
                     finalPos = lanePos + (perpDir * cfg.RoadSideOffset * sideSign)
                 end
 
-                FireEndpoint("spawn_unit", unitVal.Value, CFrame.new(finalPos))
+                FireEndpoint({"spawn_unit", "place_unit"}, slot.id, CFrame.new(finalPos))
                 task.wait(0.2)
             end
         end
@@ -1540,31 +1818,24 @@ local function RunUnitRoutine()
 
     if cfg.UseNativeAutoUpgrade and not nativeUpgradeEnabled then
         local autoUpgradeBtn = PlayerGui and PlayerGui:FindFirstChild("AutoUpgrade", true)
-        if autoUpgradeBtn and autoUpgradeBtn:IsA("GuiButton") and firesignal then
-            pcall(function() firesignal(autoUpgradeBtn.MouseButton1Click) end)
+        if autoUpgradeBtn and autoUpgradeBtn:IsA("GuiButton") then
+            ClickGuiButton(autoUpgradeBtn)
             nativeUpgradeEnabled = true
         else
-            FireEndpoint("toggle_auto_upgrade", true)
+            FireEndpoint({"toggle_auto_upgrade", "auto_upgrade"}, true)
             nativeUpgradeEnabled = true
         end
     end
 
     if cfg.FallbackManualUpgrade and not cfg.UseNativeAutoUpgrade then
-        local activeUnits = workspace:FindFirstChild("_units")
-        if activeUnits then
-            for _, unit in ipairs(activeUnits:GetChildren()) do
-                local uStats = unit:FindFirstChild("_stats")
-                local owner = uStats and uStats:FindFirstChild("player")
-                if owner and owner.Value == LocalPlayer then
-                    FireEndpoint("upgrade_unit_ingame", unit)
-                    task.wait(0.15)
-                end
-            end
+        for _, unit in ipairs(GetOwnedUnitsList()) do
+            FireEndpoint({"upgrade_unit_ingame", "upgrade_unit"}, unit)
+            task.wait(0.15)
         end
     end
 end
 
--- 14. MODULE: MATCH FLOW, SUMMER WEATHER, MODIFIER CARDS & END-OF-MATCH WEBHOOK
+-- 17. MODULE: MATCH FLOW, SUMMER WEATHER, MODIFIER CARDS & END-OF-MATCH WEBHOOK
 local function RunMatchFlow()
     if SolveCaptcha() then return end
 
@@ -1574,22 +1845,22 @@ local function RunMatchFlow()
     SendBannerWebhook(false)
 
     if cfg.AutoStart then
-        FireEndpoint("vote_start")
+        FireEndpoint({"vote_start", "start_vote"})
     end
 
     if cfg.AutoSkipWaves then
-        FireEndpoint("vote_wave_skip")
+        FireEndpoint({"vote_wave_skip", "wave_skip"})
     end
 
     if (cfg.SummerVoteTsunami or cfg.AutoPickModifierCard) and PlayerGui then
         local cardGui = PlayerGui:FindFirstChild("ModifierCards", true) or PlayerGui:FindFirstChild("WeatherVote", true)
-        if cardGui and cardGui.Visible then
+        if cardGui and IsGuiVisibleInTree(cardGui) then
             for _, btn in ipairs(cardGui:GetDescendants()) do
-                if btn:IsA("GuiButton") then
-                    local text = (btn.Text or ""):lower()
+                if btn:IsA("GuiButton") and IsGuiVisibleInTree(btn) then
+                    local text = StripRichText(btn.Text):lower()
                     if (cfg.SummerVoteTsunami and text:find("tsunami")) or
                        (cfg.AutoPickModifierCard and (text:find("pearl") or text:find("30%"))) then
-                        if firesignal then pcall(function() firesignal(btn.MouseButton1Click) end) end
+                        ClickGuiButton(btn)
                         break
                     end
                 end
@@ -1597,7 +1868,7 @@ local function RunMatchFlow()
         end
     end
 
-    local resultsGui = PlayerGui and PlayerGui:FindFirstChild("ResultsUI")
+    local resultsGui = PlayerGui and (PlayerGui:FindFirstChild("ResultsUI") or PlayerGui:FindFirstChild("EndScreen"))
     if resultsGui and resultsGui.Enabled then
         nativeUpgradeEnabled = false
         ResetMacroPlayback()
@@ -1610,14 +1881,14 @@ local function RunMatchFlow()
         ResetMatchSnapshot()
 
         if IsTargetUnitOnBanner() and HasEnoughCurrencyForRoll() then
-            FireEndpoint("request_return_lobby")
+            FireEndpoint({"request_return_lobby", "return_lobby"})
         elseif cfg.AutoReplay then
-            FireEndpoint("request_replay")
+            FireEndpoint({"request_replay", "replay"})
         end
     end
 end
 
--- 15. FAST UI TIMER LOOP
+-- 18. FAST UI TIMER LOOP
 task.spawn(function()
     while true do
         if MacroState.IsRecording then
@@ -1649,11 +1920,11 @@ task.spawn(function()
     end
 end)
 
--- 16. MAIN EXECUTION LOOP
+-- 19. MAIN EXECUTION LOOP
 task.spawn(function()
     while true do
         local isEnabled = getgenv().AAConfig.Enabled
-        local inLobby = workspace:FindFirstChild("_lobby") ~= nil
+        local inLobby = IsInLobby()
 
         if not MacroState.IsRecording and not MacroState.IsPlaying and ActivityLabelRef then
             ActivityLabelRef.Text = isEnabled
@@ -1663,17 +1934,7 @@ task.spawn(function()
         end
 
         if UnitCountLabelRef then
-            local activeUnits = workspace:FindFirstChild("_units")
-            local count = 0
-            if activeUnits then
-                for _, u in ipairs(activeUnits:GetChildren()) do
-                    local owner = u:FindFirstChild("_stats") and u._stats:FindFirstChild("player")
-                    if owner and owner.Value == LocalPlayer then
-                        count = count + 1
-                    end
-                end
-            end
-            UnitCountLabelRef.Text = "Units: " .. tostring(count)
+            UnitCountLabelRef.Text = "Units: " .. tostring(#GetOwnedUnitsList())
         end
 
         if isEnabled then
