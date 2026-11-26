@@ -23,6 +23,7 @@ end
 -- 2. SERVICES & REFERENCES
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PathfindingService = game:GetService("PathfindingService")
 local VirtualUser = game:GetService("VirtualUser")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local GuiService = game:GetService("GuiService")
@@ -38,11 +39,12 @@ local DefaultConfig = {
     Enabled = true,
     Mode = "SummerEvent",          -- Options: "SummerEvent", "MistyVillage", "Story", "InfinityCastle"
 
-    -- UNIVERSAL PARTY JOIN (Applies across ALL Farm Modes)
+    -- UNIVERSAL PARTY JOIN & LOBBY NAVIGATION
     PartyJoinEnabled = false,
     AutoCreatePartyFallback = true, -- If no matching party exists after timeout, queue solo pod
     PartySearchTimeout = 8,         -- Seconds to scan PartyFinder before solo pod fallback
     TargetPartyName = "",           -- Leave blank to auto-match current Mode (e.g., "Summer", "Misty", "Namek")
+    LobbyMoveMethod = "Hybrid",     -- Options: "Hybrid" (Walk + Teleport fallback), "Teleport", "Walk"
 
     -- PLACEMENT & MACRO SETTINGS
     PlacementMode = "Percentage",  -- Options: "Percentage", "Macro"
@@ -94,7 +96,6 @@ local function LoadConfig()
             return HttpService:JSONDecode(readfile(CONFIG_FILENAME))
         end)
         if ok and type(decoded) == "table" then
-            -- Migrate legacy Mode == "PartyJoin" cleanly
             if decoded.Mode == "PartyJoin" then
                 decoded.Mode = "SummerEvent"
                 decoded.PartyJoinEnabled = true
@@ -1191,6 +1192,7 @@ local function CreateStyledControlGui()
     local tabMain = CreateTab("Main Farm")
     AddPillToggle(tabMain, "Master Auto-Farm", "Enabled")
     AddDropdownCycle(tabMain, "Farm Mode:", "Mode", {"SummerEvent", "MistyVillage", "Story", "InfinityCastle"})
+    AddDropdownCycle(tabMain, "Lobby Move:", "LobbyMoveMethod", {"Hybrid", "Teleport", "Walk"})
     AddPillToggle(tabMain, "Party Join (All Modes)", "PartyJoinEnabled")
     AddPillToggle(tabMain, "Auto-Start & Skip Waves", "AutoStart")
     AddPillToggle(tabMain, "Auto-Replay Match", "AutoReplay")
@@ -1535,11 +1537,9 @@ local function FindActiveCaptchaContainer()
                         end
                     end
 
-                    -- Require either explicit captcha keyword or a visible TextBox + confirm/keyword combo
                     if score >= 50 or (hasVisibleBox and (hasConfirm or hasCaptchaText)) or (hasCaptchaText and hasConfirm) then
                         if score > bestScore then
                             bestScore = score
-                            -- Walk up 1-2 levels from subFrame to capture the full modal card without grabbing unrelated HUD
                             if candidateSubFrame and candidateSubFrame.Parent and candidateSubFrame.Parent:IsA("Frame") then
                                 bestContainer = candidateSubFrame.Parent
                             else
@@ -1556,7 +1556,6 @@ local function FindActiveCaptchaContainer()
 end
 
 local function EvaluateSimpleMath(text)
-    -- Normalize unicode math operators (×, ÷, −)
     local norm = text:gsub("×", "*"):gsub("÷", "/"):gsub("−", "-")
     local a, op, b = norm:match("(%d+)%s*([%+%-xX%*/])%s*(%d+)")
     if not a or not b then return nil end
@@ -1576,7 +1575,6 @@ local function ExtractSplitCharacterCode(container)
     for _, obj in ipairs(container:GetDescendants()) do
         if obj:IsA("TextLabel") and IsGuiVisibleInTree(obj) then
             local clean = StripRichText(obj.Text):gsub("%s+", "")
-            -- Filter out decoy/invisible 0-size or tiny stroke labels
             if #clean == 1 and clean:match("^[A-Za-z0-9]$")
                and obj.AbsoluteSize.X >= 8 and obj.AbsoluteSize.Y >= 8
                and obj.TextTransparency < 0.85 then
@@ -1592,7 +1590,6 @@ local function ExtractSplitCharacterCode(container)
 
     if #charLabels < 3 or #charLabels > 10 then return nil end
 
-    -- Deduplicate stacked shadow/outline TextLabels at identical screen coordinates
     table.sort(charLabels, function(a, b)
         if math.abs(a.x - b.x) <= 4 and math.abs(a.y - b.y) <= 4 then
             return a.z > b.z
@@ -1646,7 +1643,6 @@ local function SubmitTextBoxEntry(inputBox, answerStr, submitBtn)
         inputBox:CaptureFocus()
         task.wait(0.06)
         inputBox.Text = answerStr
-        -- Fire PropertyChangedSignal listeners explicitly
         if firesignal then
             pcall(function() firesignal(inputBox:GetPropertyChangedSignal("Text")) end)
         end
@@ -1654,7 +1650,6 @@ local function SubmitTextBoxEntry(inputBox, answerStr, submitBtn)
         inputBox:ReleaseFocus(true)
     end)
 
-    -- Also simulate Return key via VirtualInputManager in case FocusLost checks UserInputService
     if VirtualInputManager then
         pcall(function()
             VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
@@ -1740,14 +1735,12 @@ local function SolveCaptcha()
 
     local finalAnswer = mathAnswer or codeText
 
-    -- Strategy A: TextBox entry + Submit Button + Remote fallback
     if finalAnswer and inputBox then
         SubmitTextBoxEntry(inputBox, tostring(finalAnswer), submitBtn)
         FireAllCaptchaRemotes(finalAnswer)
         return true
     end
 
-    -- Strategy B: Direct button choice matching extracted answer (numbers, letters, or math result)
     if finalAnswer and #clickableChoices > 0 then
         local targetLower = tostring(finalAnswer):lower()
         for _, btn in ipairs(clickableChoices) do
@@ -1764,7 +1757,6 @@ local function SolveCaptcha()
         end
     end
 
-    -- Strategy C: Image / Icon grid prompt matching (inspects attributes, child ImageLabels, Image IDs, and Tooltips)
     if promptText ~= "" and #clickableChoices > 0 then
         local clickedAny = false
         for _, btn in ipairs(clickableChoices) do
@@ -1810,7 +1802,6 @@ local function SolveCaptcha()
         end
     end
 
-    -- Strategy D: If stuck on an unrecognized single-choice prompt after 3 tries, probe first choice + submit
     if CaptchaAttemptCount >= 3 and #clickableChoices > 0 then
         local pick = clickableChoices[((CaptchaAttemptCount - 1) % #clickableChoices) + 1]
         ClickGuiButton(pick)
@@ -1871,22 +1862,227 @@ local function RunBannerRoutine()
     return true
 end
 
--- 13. MODULE: LOBBY & MATCHMAKING (UNIVERSAL PARTY JOIN ACROSS ALL MODES + SOLO POD FALLBACK)
+-- 13. MODULE: LOBBY & MATCHMAKING (FULL WORKSPACE POD DISCOVERY + PATHFIND/TOUCH + QUEUE)
 local LobbySearchStartTime = 0
+local LastPodMoveTime = 0
+local IsWalkingToPod = false
 
-local function MoveToLobbyPod(podKeyword)
+local function GetPartFromInstance(inst)
+    if not inst then return nil end
+    if inst:IsA("BasePart") then return inst end
+    if inst:IsA("Model") then
+        return inst.PrimaryPart
+            or inst:FindFirstChild("Door")
+            or inst:FindFirstChild("Pad")
+            or inst:FindFirstChild("Trigger")
+            or inst:FindFirstChild("TouchPart")
+            or inst:FindFirstChildWhichIsA("BasePart", true)
+    end
+    return nil
+end
+
+local function FindBestLobbyPod(keywords, preferredPodName)
+    local searchRoots = {}
     local lobbyFolder = workspace:FindFirstChild("_lobby") or workspace:FindFirstChild("Lobby")
-    if not lobbyFolder or not LocalPlayer.Character then return end
+    if lobbyFolder then table.insert(searchRoots, lobbyFolder) end
+    table.insert(searchRoots, workspace)
 
-    local needle = podKeyword:lower()
-    for _, obj in ipairs(lobbyFolder:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Name:lower():find(needle, 1, true) then
-            local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if hrp and (hrp.Position - obj.Position).Magnitude > 8 then
-                LocalPlayer.Character:PivotTo(obj.CFrame + Vector3.new(0, 3, 0))
+    local kwList = type(keywords) == "table" and keywords or { tostring(keywords) }
+    local lowerKws = {}
+    for _, k in ipairs(kwList) do
+        local clean = tostring(k):lower()
+        if clean ~= "" then table.insert(lowerKws, clean) end
+    end
+
+    -- 1. Exact pod name match first (e.g., Story_Pod_1, SummerEvent_Pod_1)
+    if preferredPodName and preferredPodName ~= "" then
+        local exactNeedle = preferredPodName:lower()
+        for _, root in ipairs(searchRoots) do
+            for _, obj in ipairs(root:GetDescendants()) do
+                if obj.Name:lower() == exactNeedle or obj.Name:lower():find(exactNeedle, 1, true) then
+                    local part = GetPartFromInstance(obj)
+                    if part and part.Position.Y > -200 then
+                        return part, obj
+                    end
+                end
             end
-            return
         end
+    end
+
+    -- 2. Score-based scan across pod models, pads, doors, and BillboardGui/SurfaceGui labels
+    local bestPart = nil
+    local bestOwner = nil
+    local bestScore = -1
+
+    local function ScoreCandidate(part, ownerObj, textBlob)
+        local lower = textBlob:lower()
+        local matchedKw = false
+        local score = 0
+
+        for _, kw in ipairs(lowerKws) do
+            if lower:find(kw, 1, true) then
+                matchedKw = true
+                score = score + 50
+            end
+        end
+        if not matchedKw then return end
+
+        if lower:find("pod") or lower:find("pad") or lower:find("portal") or lower:find("door") or lower:find("elevator") or lower:find("teleporter") or lower:find("zone") or lower:find("queue") then
+            score = score + 30
+        end
+        if ownerObj:FindFirstChildWhichIsA("TouchTransmitter", true) or part:FindFirstChildWhichIsA("TouchTransmitter", true) then
+            score = score + 40
+        end
+        if lower:find("inprogress") or lower:find("full") or lower:find("locked") then
+            score = score - 40
+        end
+        -- Prefer empty/open pods (often numbered _1 or without active player occupant)
+        if lower:find("_1") or lower:find("pod1") then
+            score = score + 10
+        end
+
+        if score > bestScore then
+            bestScore = score
+            bestPart = part
+            bestOwner = ownerObj
+        end
+    end
+
+    for _, root in ipairs(searchRoots) do
+        for _, obj in ipairs(root:GetDescendants()) do
+            if obj:IsA("Model") or obj:IsA("BasePart") then
+                local part = GetPartFromInstance(obj)
+                if part and part.Position.Y > -200 then
+                    local blob = obj.Name .. " " .. (obj.Parent and obj.Parent.Name or "")
+                    ScoreCandidate(part, obj, blob)
+                end
+            elseif obj:IsA("TextLabel") and obj.Text ~= "" then
+                local guiParent = obj:FindFirstAncestorWhichIsA("BillboardGui") or obj:FindFirstAncestorWhichIsA("SurfaceGui")
+                local adornee = guiParent and (guiParent.Adornee or guiParent.Parent)
+                local part = GetPartFromInstance(adornee)
+                if part and part.Position.Y > -200 then
+                    ScoreCandidate(part, adornee, StripRichText(obj.Text) .. " " .. adornee.Name)
+                end
+            end
+        end
+        if bestPart then break end
+    end
+
+    return bestPart, bestOwner
+end
+
+local function TriggerPodTouch(targetPart, targetOwner)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp or not targetPart then return end
+
+    if firetouchinterest then
+        local touchParts = { targetPart }
+        if targetOwner then
+            for _, d in ipairs(targetOwner:GetDescendants()) do
+                if d:IsA("BasePart") and d ~= targetPart then
+                    table.insert(touchParts, d)
+                end
+            end
+        end
+        for _, p in ipairs(touchParts) do
+            pcall(function()
+                firetouchinterest(hrp, p, 0)
+                task.wait(0.05)
+                firetouchinterest(hrp, p, 1)
+            end)
+        end
+    end
+end
+
+local function WalkToPosition(targetPos)
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hum or not hrp then return false end
+
+    IsWalkingToPod = true
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 2,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        WaypointSpacing = 4
+    })
+
+    local ok = pcall(function()
+        path:ComputeAsync(hrp.Position, targetPos)
+    end)
+
+    if ok and path.Status == Enum.PathStatus.Success then
+        for _, wp in ipairs(path:GetWaypoints()) do
+            if not IsInLobby() or not getgenv().AAConfig.Enabled then break end
+            if wp.Action == Enum.PathWaypointAction.Jump then
+                hum.Jump = true
+            end
+            hum:MoveTo(wp.Position)
+            local reached = hum.MoveToFinished:Wait()
+            if not reached then break end
+        end
+    else
+        hum:MoveTo(targetPos)
+        hum.MoveToFinished:Wait()
+    end
+
+    IsWalkingToPod = false
+    return (hrp.Position - targetPos).Magnitude <= 10
+end
+
+local function MoveToLobbyPod(keywords, preferredPodName)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    local targetPart, targetOwner = FindBestLobbyPod(keywords, preferredPodName)
+    if not targetPart then return false end
+
+    local dist = (hrp.Position - targetPart.Position).Magnitude
+    if dist <= 6 then
+        TriggerPodTouch(targetPart, targetOwner)
+        return true
+    end
+
+    if (os.clock() - LastPodMoveTime) < 1.2 or IsWalkingToPod then
+        return false
+    end
+    LastPodMoveTime = os.clock()
+
+    local method = getgenv().AAConfig.LobbyMoveMethod or "Hybrid"
+    local destPos = targetPart.Position + Vector3.new(0, 3, 0)
+
+    if method == "Teleport" then
+        char:PivotTo(CFrame.new(destPos))
+        task.wait(0.15)
+        TriggerPodTouch(targetPart, targetOwner)
+        return true
+    elseif method == "Walk" then
+        task.spawn(function()
+            if WalkToPosition(destPos) then
+                TriggerPodTouch(targetPart, targetOwner)
+            end
+        end)
+        return true
+    else
+        -- Hybrid: pathfind/walk if close (< 45 studs), otherwise pivot + fire touch
+        if dist < 45 then
+            task.spawn(function()
+                if WalkToPosition(destPos) then
+                    TriggerPodTouch(targetPart, targetOwner)
+                else
+                    char:PivotTo(CFrame.new(destPos))
+                    TriggerPodTouch(targetPart, targetOwner)
+                end
+            end)
+        else
+            char:PivotTo(CFrame.new(destPos))
+            task.wait(0.15)
+            TriggerPodTouch(targetPart, targetOwner)
+        end
+        return true
     end
 end
 
@@ -1926,7 +2122,6 @@ local function TryJoinModeParty()
 
     local partyGui = FindPartyFinderGui()
     if not partyGui then
-        -- Attempt to open PartyFinder UI via button or remote if hidden
         local openBtn = PlayerGui and (PlayerGui:FindFirstChild("PartyButton", true) or PlayerGui:FindFirstChild("PartiesButton", true))
         if openBtn and openBtn:IsA("GuiButton") then
             ClickGuiButton(openBtn)
@@ -1955,7 +2150,6 @@ local function TryJoinModeParty()
             end
 
             if matched then
-                -- Walk up 1-3 parent containers to locate the Join button inside this party card
                 local container = desc.Parent
                 for _ = 1, 3 do
                     if not container then break end
@@ -1987,34 +2181,79 @@ local function TryJoinModeParty()
     return false
 end
 
+local function ConfirmLobbySelectionGui(keywords)
+    if not PlayerGui then return end
+    local kwList = type(keywords) == "table" and keywords or { tostring(keywords) }
+
+    for _, gui in ipairs(PlayerGui:GetChildren()) do
+        if gui:IsA("ScreenGui") and gui.Enabled and gui.Name ~= "AAModernHubUI" then
+            for _, desc in ipairs(gui:GetDescendants()) do
+                if desc:IsA("GuiButton") and IsGuiVisibleInTree(desc) then
+                    local txt = (desc.Name .. " " .. (desc:IsA("TextButton") and StripRichText(desc.Text) or "")):lower()
+                    for _, kw in ipairs(kwList) do
+                        if kw ~= "" and txt:find(kw:lower(), 1, true) then
+                            ClickGuiButton(desc)
+                            task.wait(0.1)
+                            break
+                        end
+                    end
+                    if txt == "start" or txt == "confirm" or txt == "create" or txt == "enter" or txt == "play" or txt == "select" then
+                        ClickGuiButton(desc)
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function QueueSoloModePod()
     local cfg = getgenv().AAConfig
     local mode = cfg.Mode
 
     if mode == "Story" then
         local levelId = string.format("%s_level_%s", cfg.StoryWorld, cfg.StoryAct)
-        MoveToLobbyPod(cfg.StoryPod)
-        FireEndpoint({"request_join_lobby", "join_lobby"}, cfg.StoryPod)
-        task.wait(0.5)
-        FireEndpoint({"request_match_making", "match_making"}, cfg.StoryPod, levelId, true, cfg.StoryDifficulty)
-        task.wait(0.5)
-        FireEndpoint({"request_start_game", "start_game"}, cfg.StoryPod)
+        local _, podObj = FindBestLobbyPod({"story", tostring(cfg.StoryWorld)}, cfg.StoryPod)
+        local podName = podObj and podObj.Name or cfg.StoryPod
+
+        MoveToLobbyPod({"story", tostring(cfg.StoryWorld)}, podName)
+        task.wait(0.35)
+        FireEndpoint({"request_join_lobby", "join_lobby"}, podName)
+        task.wait(0.35)
+        ConfirmLobbySelectionGui({cfg.StoryWorld, "act " .. tostring(cfg.StoryAct), cfg.StoryDifficulty})
+        FireEndpoint({"request_match_making", "match_making"}, podName, levelId, true, cfg.StoryDifficulty)
+        task.wait(0.35)
+        FireEndpoint({"request_start_game", "start_game"}, podName)
 
     elseif mode == "SummerEvent" then
-        MoveToLobbyPod("Summer")
-        FireEndpoint({"request_join_lobby", "join_lobby"}, "SummerEvent_Pod_1")
-        task.wait(0.6)
-        FireEndpoint({"request_start_game", "start_game"}, "SummerEvent_Pod_1")
+        local _, podObj = FindBestLobbyPod({"summer", "event", "pearl"}, "SummerEvent_Pod_1")
+        local podName = podObj and podObj.Name or "SummerEvent_Pod_1"
+
+        MoveToLobbyPod({"summer", "event", "pearl"}, podName)
+        task.wait(0.35)
+        FireEndpoint({"request_join_lobby", "join_lobby"}, podName)
+        task.wait(0.35)
+        ConfirmLobbySelectionGui({"summer", "event"})
+        FireEndpoint({"request_start_game", "start_game"}, podName)
 
     elseif mode == "MistyVillage" then
-        MoveToLobbyPod("Misty")
-        FireEndpoint({"request_join_lobby", "join_lobby"}, "MistyVillage_Pod_1")
-        task.wait(0.6)
-        FireEndpoint({"request_start_game", "start_game"}, "MistyVillage_Pod_1")
+        local _, podObj = FindBestLobbyPod({"misty", "village", "dawn"}, "MistyVillage_Pod_1")
+        local podName = podObj and podObj.Name or "MistyVillage_Pod_1"
+
+        MoveToLobbyPod({"misty", "village", "dawn"}, podName)
+        task.wait(0.35)
+        FireEndpoint({"request_join_lobby", "join_lobby"}, podName)
+        task.wait(0.35)
+        ConfirmLobbySelectionGui({"misty", "village"})
+        FireEndpoint({"request_start_game", "start_game"}, podName)
 
     elseif mode == "InfinityCastle" then
-        MoveToLobbyPod("Infinity")
-        FireEndpoint({"request_start_infinity_castle", "infinity_castle"})
+        local _, podObj = FindBestLobbyPod({"infinity", "castle"}, "InfinityCastle_Pod_1")
+        local podName = podObj and podObj.Name or "InfinityCastle_Pod_1"
+
+        MoveToLobbyPod({"infinity", "castle"}, podName)
+        task.wait(0.35)
+        ConfirmLobbySelectionGui({"infinity", "castle"})
+        FireEndpoint({"request_start_infinity_castle", "infinity_castle"}, podName)
     end
 end
 
@@ -2033,7 +2272,6 @@ local function RunLobbyRoutine()
             return
         end
 
-        -- If no party matched within timeout and fallback is enabled, launch the mode's pod directly
         if cfg.AutoCreatePartyFallback and (os.clock() - LobbySearchStartTime) >= (cfg.PartySearchTimeout or 8) then
             QueueSoloModePod()
         end
