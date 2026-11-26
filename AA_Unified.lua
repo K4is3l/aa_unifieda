@@ -1,12 +1,12 @@
 -- ============================================================================
--- ANIME ADVENTURES (UPD 21.5+) - FULL COMPILED AUTO-FARM & MACRO PANEL
+-- ANIME ADVENTURES (UPD 21.5+) - MOBILE-OPTIMIZED AUTO-FARM & MACRO PANEL
 -- Save as 'AA_Unified.lua' in your executor's 'autoexec' and 'workspace' folders.
 -- ============================================================================
 
 repeat task.wait() until game:IsLoaded()
 
 if getgenv().AA_Loaded then
-    warn("[AA_Unified] Re-executing UI & updating loops...")
+    warn("[AA_Unified] Reloading script...")
 end
 getgenv().AA_Loaded = true
 
@@ -24,12 +24,13 @@ end
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PathfindingService = game:GetService("PathfindingService")
+local UserInputService = game:GetService("UserInputService")
 local VirtualUser = game:GetService("VirtualUser")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local GuiService = game:GetService("GuiService")
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 
+local IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 15)
 
@@ -41,10 +42,10 @@ local DefaultConfig = {
 
     -- UNIVERSAL PARTY JOIN & LOBBY NAVIGATION
     PartyJoinEnabled = false,
-    AutoCreatePartyFallback = true, -- If no matching party exists after timeout, queue solo pod
-    PartySearchTimeout = 8,         -- Seconds to scan PartyFinder before solo pod fallback
-    TargetPartyName = "",           -- Leave blank to auto-match current Mode (e.g., "Summer", "Misty", "Namek")
-    LobbyMoveMethod = "Hybrid",     -- Options: "Hybrid" (Walk + Teleport fallback), "Teleport", "Walk"
+    AutoCreatePartyFallback = true,
+    PartySearchTimeout = 8,
+    TargetPartyName = "",
+    LobbyMoveMethod = "Teleport",  -- Default "Teleport" for instant pod entry without walk-stutter
 
     -- PLACEMENT & MACRO SETTINGS
     PlacementMode = "Percentage",  -- Options: "Percentage", "Macro"
@@ -68,8 +69,8 @@ local DefaultConfig = {
     -- BANNER CHECKER, RARITY FILTER & AUTO-SUMMON
     BannerCheckEnabled = true,
     TargetBannerUnit = "Vego",
-    TargetBannerRarity = "Mythic", -- Options: "Any", "Legendary", "Mythic", "Secret"
-    TargetBannerType = "Standard", -- Options: "Standard", "MistyVillage", "Summer"
+    TargetBannerRarity = "Mythic",
+    TargetBannerType = "Standard",
     SummonMulti = true,
     BannerTargetAcquired = false,
 
@@ -120,7 +121,7 @@ end
 getgenv().AAConfig = LoadConfig()
 SaveConfig(getgenv().AAConfig)
 
--- 4. SAFE GUI CLICKER (FIRESIGNAL + VIRTUALINPUTMANAGER FALLBACK)
+-- 4. MOBILE-SAFE GUI CLICKER (NO KEYBOARD POPUP, NO VIM MOUSE FREEZE)
 local function ClickGuiButton(btn)
     if not btn or not btn:IsA("GuiButton") then return false end
 
@@ -135,25 +136,28 @@ local function ClickGuiButton(btn)
             clicked = true
         end)
         pcall(function()
-            firesignal(btn.MouseButton1Down)
-            firesignal(btn.MouseButton1Up)
+            firesignal(btn.TouchTap)
+            clicked = true
         end)
     end
 
-    if VirtualInputManager then
-        pcall(function()
-            local inset = GuiService:GetGuiInset()
-            local pos = btn.AbsolutePosition
-            local size = btn.AbsoluteSize
-            if size.X > 0 and size.Y > 0 then
-                local cx = pos.X + (size.X / 2)
-                local cy = pos.Y + (size.Y / 2) + inset.Y
-                VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
-                task.wait(0.03)
-                VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-                clicked = true
-            end
-        end)
+    if not clicked and not IsMobile then
+        local vim = game:FindService("VirtualInputManager")
+        if vim then
+            pcall(function()
+                local inset = GuiService:GetGuiInset()
+                local pos = btn.AbsolutePosition
+                local size = btn.AbsoluteSize
+                if size.X > 0 and size.Y > 0 then
+                    local cx = pos.X + (size.X / 2)
+                    local cy = pos.Y + (size.Y / 2) + inset.Y
+                    vim:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+                    task.wait(0.02)
+                    vim:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+                    clicked = true
+                end
+            end)
+        end
     end
 
     return clicked
@@ -161,8 +165,10 @@ end
 
 -- 5. ANTI-AFK & FUZZY REMOTE DISPATCHER
 LocalPlayer.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
+    pcall(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
 end)
 
 local RemoteCache = {}
@@ -253,7 +259,7 @@ local function IsInLobby()
     if wavesObj then
         return false
     end
-    if PlayerGui and (PlayerGui:FindFirstChild("SpawnUnitUI", true) or PlayerGui:FindFirstChild("WaveUI", true)) then
+    if PlayerGui and (PlayerGui:FindFirstChild("SpawnUnitUI") or PlayerGui:FindFirstChild("WaveUI")) then
         return false
     end
     return true
@@ -694,7 +700,7 @@ local function GetCurrentBannerUnits()
         end
     end
 
-    local summonGui = PlayerGui and (PlayerGui:FindFirstChild("SummonUI", true) or PlayerGui:FindFirstChild("BannerGui", true))
+    local summonGui = PlayerGui and (PlayerGui:FindFirstChild("SummonUI") or PlayerGui:FindFirstChild("BannerGui"))
     if summonGui then
         for _, frame in ipairs(summonGui:GetDescendants()) do
             if frame:IsA("Frame") or frame:IsA("ImageLabel") then
@@ -823,7 +829,7 @@ local function SendBannerWebhook(forceTest)
     return true
 end
 
--- 10. MODULE: MODERN STYLED UI (CYAN / VIOLET / EMERALD DARK THEME)
+-- 10. MODULE: MODERN STYLED UI (MOBILE-RESPONSIVE & NON-BLOCKING)
 local ActivityLabelRef = nil
 local UnitCountLabelRef = nil
 local MacroStatusLabelRef = nil
@@ -851,10 +857,13 @@ local function CreateStyledControlGui()
     pcall(function() gui.Parent = CoreGui end)
     if not gui.Parent and PlayerGui then gui.Parent = PlayerGui end
 
+    local winW = IsMobile and 430 or 500
+    local winH = IsMobile and 285 or 325
+
     local main = Instance.new("Frame")
     main.Name = "MainWindow"
-    main.Size = UDim2.new(0, 500, 0, 325)
-    main.Position = UDim2.new(0.5, -250, 0.22, 0)
+    main.Size = UDim2.new(0, winW, 0, winH)
+    main.Position = UDim2.new(0.5, -math.floor(winW / 2), 0.14, 0)
     main.BackgroundColor3 = COL_BG_DARK
     main.BorderSizePixel = 0
     main.Active = true
@@ -874,24 +883,24 @@ local function CreateStyledControlGui()
     })
 
     local topBar = Instance.new("Frame")
-    topBar.Size = UDim2.new(1, 0, 0, 38)
+    topBar.Size = UDim2.new(1, 0, 0, 36)
     topBar.BackgroundTransparency = 1
     topBar.Parent = main
 
     local titleLbl = Instance.new("TextLabel")
     titleLbl.Size = UDim2.new(1, -80, 1, 0)
-    titleLbl.Position = UDim2.new(0, 16, 0, 0)
+    titleLbl.Position = UDim2.new(0, 14, 0, 0)
     titleLbl.BackgroundTransparency = 1
     titleLbl.Font = Enum.Font.GothamBold
-    titleLbl.TextSize = 14
+    titleLbl.TextSize = IsMobile and 12 or 14
     titleLbl.TextColor3 = COL_TEXT_MAIN
     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
-    titleLbl.Text = "Anime Adventures — Unified Control Panel (Upd 21.5)"
+    titleLbl.Text = "Anime Adventures — Unified Hub (Upd 21.5)"
     titleLbl.Parent = topBar
 
     local minBtn = Instance.new("TextButton")
     minBtn.Size = UDim2.new(0, 26, 0, 26)
-    minBtn.Position = UDim2.new(1, -64, 0, 6)
+    minBtn.Position = UDim2.new(1, -64, 0, 5)
     minBtn.BackgroundColor3 = COL_CARD
     minBtn.Font = Enum.Font.GothamBold
     minBtn.TextSize = 14
@@ -902,7 +911,7 @@ local function CreateStyledControlGui()
 
     local closeBtn = Instance.new("TextButton")
     closeBtn.Size = UDim2.new(0, 26, 0, 26)
-    closeBtn.Position = UDim2.new(1, -34, 0, 6)
+    closeBtn.Position = UDim2.new(1, -34, 0, 5)
     closeBtn.BackgroundColor3 = COL_CARD
     closeBtn.Font = Enum.Font.GothamBold
     closeBtn.TextSize = 13
@@ -913,29 +922,30 @@ local function CreateStyledControlGui()
 
     local divider = Instance.new("Frame")
     divider.Size = UDim2.new(1, -24, 0, 1)
-    divider.Position = UDim2.new(0, 12, 0, 38)
+    divider.Position = UDim2.new(0, 12, 0, 36)
     divider.BackgroundColor3 = Color3.fromRGB(38, 44, 58)
     divider.BorderSizePixel = 0
     divider.Parent = main
 
+    local sideW = IsMobile and 108 or 130
     local sidebar = Instance.new("Frame")
-    sidebar.Size = UDim2.new(0, 130, 1, -50)
-    sidebar.Position = UDim2.new(0, 12, 0, 46)
+    sidebar.Size = UDim2.new(0, sideW, 1, -48)
+    sidebar.Position = UDim2.new(0, 10, 0, 44)
     sidebar.BackgroundTransparency = 1
     sidebar.Parent = main
 
     local sideLayout = Instance.new("UIListLayout", sidebar)
-    sideLayout.Padding = UDim.new(0, 8)
+    sideLayout.Padding = UDim.new(0, 7)
 
     local contentArea = Instance.new("Frame")
-    contentArea.Size = UDim2.new(1, -162, 1, -86)
-    contentArea.Position = UDim2.new(0, 150, 0, 46)
+    contentArea.Size = UDim2.new(1, -(sideW + 28), 1, -84)
+    contentArea.Position = UDim2.new(0, sideW + 18, 0, 44)
     contentArea.BackgroundTransparency = 1
     contentArea.Parent = main
 
     local footerBar = Instance.new("Frame")
-    footerBar.Size = UDim2.new(1, -162, 0, 30)
-    footerBar.Position = UDim2.new(0, 150, 1, -38)
+    footerBar.Size = UDim2.new(1, -(sideW + 28), 0, 28)
+    footerBar.Position = UDim2.new(0, sideW + 18, 1, -36)
     footerBar.BackgroundColor3 = COL_CARD
     footerBar.Parent = main
     Instance.new("UICorner", footerBar).CornerRadius = UDim.new(0, 8)
@@ -974,7 +984,7 @@ local function CreateStyledControlGui()
         contentArea.Visible = not minimized
         footerBar.Visible = not minimized
         divider.Visible = not minimized
-        main.Size = minimized and UDim2.new(0, 500, 0, 38) or UDim2.new(0, 500, 0, 325)
+        main.Size = minimized and UDim2.new(0, winW, 0, 36) or UDim2.new(0, winW, 0, winH)
         minBtn.Text = minimized and "+" or "—"
     end)
 
@@ -987,10 +997,10 @@ local function CreateStyledControlGui()
 
     local function CreateTab(labelText)
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(1, 0, 0, 36)
+        btn.Size = UDim2.new(1, 0, 0, 34)
         btn.BackgroundColor3 = COL_CARD
         btn.Font = Enum.Font.GothamSemibold
-        btn.TextSize = 12
+        btn.TextSize = IsMobile and 11 or 12
         btn.TextColor3 = COL_TEXT_DIM
         btn.Text = labelText
         btn.Parent = sidebar
@@ -1046,24 +1056,24 @@ local function CreateStyledControlGui()
 
         local dot = Instance.new("Frame")
         dot.Size = UDim2.new(0, 8, 0, 8)
-        dot.Position = UDim2.new(0, 12, 0.5, -4)
+        dot.Position = UDim2.new(0, 10, 0.5, -4)
         dot.Parent = row
         Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
 
         local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(1, -95, 1, 0)
-        lbl.Position = UDim2.new(0, 28, 0, 0)
+        lbl.Size = UDim2.new(1, -90, 1, 0)
+        lbl.Position = UDim2.new(0, 24, 0, 0)
         lbl.BackgroundTransparency = 1
         lbl.Font = Enum.Font.GothamSemibold
-        lbl.TextSize = 12
+        lbl.TextSize = 11
         lbl.TextColor3 = COL_TEXT_MAIN
         lbl.TextXAlignment = Enum.TextXAlignment.Left
         lbl.Text = labelText
         lbl.Parent = row
 
         local pill = Instance.new("TextButton")
-        pill.Size = UDim2.new(0, 54, 0, 22)
-        pill.Position = UDim2.new(1, -64, 0.5, -11)
+        pill.Size = UDim2.new(0, 52, 0, 22)
+        pill.Position = UDim2.new(1, -60, 0.5, -11)
         pill.Font = Enum.Font.GothamBold
         pill.TextSize = 10
         pill.TextColor3 = Color3.new(1, 1, 1)
@@ -1098,17 +1108,17 @@ local function CreateStyledControlGui()
 
         local lbl = Instance.new("TextLabel")
         lbl.Size = UDim2.new(0.45, 0, 1, 0)
-        lbl.Position = UDim2.new(0, 12, 0, 0)
+        lbl.Position = UDim2.new(0, 10, 0, 0)
         lbl.BackgroundTransparency = 1
         lbl.Font = Enum.Font.Gotham
-        lbl.TextSize = 12
+        lbl.TextSize = 11
         lbl.TextColor3 = COL_TEXT_DIM
         lbl.TextXAlignment = Enum.TextXAlignment.Left
         lbl.Text = labelText
         lbl.Parent = row
 
         local valBtn = Instance.new("TextButton")
-        valBtn.Size = UDim2.new(0.50, -10, 0, 24)
+        valBtn.Size = UDim2.new(0.50, -8, 0, 24)
         valBtn.Position = UDim2.new(0.50, 0, 0.5, -12)
         valBtn.BackgroundColor3 = COL_INPUT
         valBtn.Font = Enum.Font.GothamSemibold
@@ -1151,17 +1161,17 @@ local function CreateStyledControlGui()
 
         local lbl = Instance.new("TextLabel")
         lbl.Size = UDim2.new(0.45, 0, 1, 0)
-        lbl.Position = UDim2.new(0, 12, 0, 0)
+        lbl.Position = UDim2.new(0, 10, 0, 0)
         lbl.BackgroundTransparency = 1
         lbl.Font = Enum.Font.Gotham
-        lbl.TextSize = 12
+        lbl.TextSize = 11
         lbl.TextColor3 = COL_TEXT_DIM
         lbl.TextXAlignment = Enum.TextXAlignment.Left
         lbl.Text = labelText
         lbl.Parent = row
 
         local box = Instance.new("TextBox")
-        box.Size = UDim2.new(0.50, -10, 0, 24)
+        box.Size = UDim2.new(0.50, -8, 0, 24)
         box.Position = UDim2.new(0.50, 0, 0.5, -12)
         box.BackgroundColor3 = COL_INPUT
         box.Font = Enum.Font.GothamSemibold
@@ -1192,7 +1202,7 @@ local function CreateStyledControlGui()
     local tabMain = CreateTab("Main Farm")
     AddPillToggle(tabMain, "Master Auto-Farm", "Enabled")
     AddDropdownCycle(tabMain, "Farm Mode:", "Mode", {"SummerEvent", "MistyVillage", "Story", "InfinityCastle"})
-    AddDropdownCycle(tabMain, "Lobby Move:", "LobbyMoveMethod", {"Hybrid", "Teleport", "Walk"})
+    AddDropdownCycle(tabMain, "Lobby Move:", "LobbyMoveMethod", {"Teleport", "Hybrid", "Walk"})
     AddPillToggle(tabMain, "Party Join (All Modes)", "PartyJoinEnabled")
     AddPillToggle(tabMain, "Auto-Start & Skip Waves", "AutoStart")
     AddPillToggle(tabMain, "Auto-Replay Match", "AutoReplay")
@@ -1217,17 +1227,17 @@ local function CreateStyledControlGui()
 
     local macroHeader = Instance.new("TextLabel")
     macroHeader.Size = UDim2.new(0.52, 0, 0, 24)
-    macroHeader.Position = UDim2.new(0, 12, 0, 6)
+    macroHeader.Position = UDim2.new(0, 10, 0, 6)
     macroHeader.BackgroundTransparency = 1
     macroHeader.Font = Enum.Font.GothamBold
-    macroHeader.TextSize = 12
+    macroHeader.TextSize = 11
     macroHeader.TextColor3 = COL_CYAN
     macroHeader.TextXAlignment = Enum.TextXAlignment.Left
     macroHeader.Text = "MACRO STUDIO"
     macroHeader.Parent = macroCard
 
     local macroNameBox = Instance.new("TextBox")
-    macroNameBox.Size = UDim2.new(0.44, -12, 0, 22)
+    macroNameBox.Size = UDim2.new(0.44, -10, 0, 22)
     macroNameBox.Position = UDim2.new(0.56, 0, 0, 7)
     macroNameBox.BackgroundColor3 = COL_INPUT
     macroNameBox.Font = Enum.Font.GothamSemibold
@@ -1247,7 +1257,7 @@ local function CreateStyledControlGui()
     macroStatusBox.Position = UDim2.new(0, 10, 0, 34)
     macroStatusBox.BackgroundColor3 = COL_INPUT
     macroStatusBox.Font = Enum.Font.GothamSemibold
-    macroStatusBox.TextSize = 11
+    macroStatusBox.TextSize = 10
     macroStatusBox.TextColor3 = COL_TEXT_DIM
     macroStatusBox.Parent = macroCard
     Instance.new("UICorner", macroStatusBox).CornerRadius = UDim.new(0, 6)
@@ -1289,7 +1299,7 @@ local function CreateStyledControlGui()
         b.Position = UDim2.new(posX, posX > 0 and 3 or 0, 0, posY)
         b.BackgroundColor3 = bgColor
         b.Font = Enum.Font.GothamBold
-        b.TextSize = 11
+        b.TextSize = 10
         b.TextColor3 = Color3.new(1, 1, 1)
         b.Text = text
         b.Parent = gridContainer
@@ -1450,7 +1460,7 @@ end
 
 CreateStyledControlGui()
 
--- 11. MODULE: CAPTCHA SOLVER (DEEP MODAL SCAN, ZINDEX SPLIT-CHAR, MATH, IMAGE ASSET & MULTI-REMOTE)
+-- 11. MODULE: MOBILE-SAFE CAPTCHA SOLVER (NO CAPTUREFOCUS KEYBOARD POPUP, STRICT MODAL CHECK)
 local LastCaptchaAttempt = 0
 local CaptchaAttemptCount = 0
 
@@ -1470,16 +1480,15 @@ local function IsGuiVisibleInTree(inst)
     return true
 end
 
-local CAPTCHA_KEYWORDS = {
-    "captcha", "verify", "verification", "security", "human",
-    "bot", "antibot", "anti_bot", "afk", "check", "robot", "prove",
-    "challenge", "answer", "code"
+local STRICT_CAPTCHA_EXCLUSIONS = {
+    "chat", "bubblechat", "topbar", "playerlist", "backpack",
+    "robloxgui", "freecam", "aamoderNHUBUI", "aamoder", "settings"
 }
 
-local function ContainsCaptchaKeyword(str)
-    local lower = tostring(str or ""):lower()
-    for _, kw in ipairs(CAPTCHA_KEYWORDS) do
-        if lower:find(kw, 1, true) then
+local function IsExcludedGuiName(name)
+    local lower = tostring(name or ""):lower()
+    for _, ex in ipairs(STRICT_CAPTCHA_EXCLUSIONS) do
+        if lower:find(ex, 1, true) then
             return true
         end
     end
@@ -1487,72 +1496,45 @@ local function ContainsCaptchaKeyword(str)
 end
 
 local function FindActiveCaptchaContainer()
-    local roots = { PlayerGui, CoreGui }
-    local bestContainer = nil
-    local bestScore = 0
+    if not PlayerGui then return nil end
 
-    for _, root in ipairs(roots) do
-        if root then
-            for _, gui in ipairs(root:GetChildren()) do
-                if gui:IsA("ScreenGui") and gui.Enabled and gui.Name ~= "AAModernHubUI" then
-                    local score = 0
-                    if ContainsCaptchaKeyword(gui.Name) then
-                        score = score + 50
-                    end
+    for _, gui in ipairs(PlayerGui:GetChildren()) do
+        if gui:IsA("ScreenGui") and gui.Enabled and not IsExcludedGuiName(gui.Name) then
+            local gLower = gui.Name:lower()
+            local isExplicitCaptchaGui = gLower:find("captcha") or gLower:find("antibot") or gLower:find("anti_bot") or gLower:find("verify")
 
-                    local hasVisibleBox = false
-                    local hasCaptchaText = false
-                    local hasConfirm = false
-                    local candidateSubFrame = nil
+            local hasCaptchaPhrase = false
+            local hasVisibleBox = false
+            local candidateContainer = nil
 
-                    for _, desc in ipairs(gui:GetDescendants()) do
-                        if IsGuiVisibleInTree(desc) then
-                            if desc:IsA("TextBox") then
-                                hasVisibleBox = true
-                                score = score + 25
-                                if not candidateSubFrame then
-                                    candidateSubFrame = desc.Parent
-                                end
-                            elseif desc:IsA("TextLabel") or desc:IsA("TextButton") then
-                                local txt = StripRichText(desc.Text)
-                                local combined = (desc.Name .. " " .. txt):lower()
-                                if combined:find("captcha") or combined:find("anti%-bot") or combined:find("antibot") or combined:find("are you a robot") or combined:find("human verification") or combined:find("afk check") then
-                                    hasCaptchaText = true
-                                    score = score + 60
-                                    if desc.Parent and desc.Parent:IsA("GuiObject") then
-                                        candidateSubFrame = desc.Parent
-                                    end
-                                elseif ContainsCaptchaKeyword(desc.Name) or ContainsCaptchaKeyword(txt) then
-                                    hasCaptchaText = true
-                                    score = score + 20
-                                end
-
-                                if desc:IsA("GuiButton") then
-                                    if combined:find("submit") or combined:find("verify") or combined:find("confirm") or combined:find("enter") or combined:find("ok") or combined:find("done") then
-                                        hasConfirm = true
-                                        score = score + 20
-                                    end
-                                end
-                            end
+            for _, desc in ipairs(gui:GetDescendants()) do
+                if IsGuiVisibleInTree(desc) then
+                    if desc:IsA("TextBox") then
+                        hasVisibleBox = true
+                        if not candidateContainer then
+                            candidateContainer = desc.Parent
                         end
-                    end
-
-                    if score >= 50 or (hasVisibleBox and (hasConfirm or hasCaptchaText)) or (hasCaptchaText and hasConfirm) then
-                        if score > bestScore then
-                            bestScore = score
-                            if candidateSubFrame and candidateSubFrame.Parent and candidateSubFrame.Parent:IsA("Frame") then
-                                bestContainer = candidateSubFrame.Parent
-                            else
-                                bestContainer = gui
-                            end
+                    elseif desc:IsA("TextLabel") or desc:IsA("TextButton") then
+                        local txt = StripRichText(desc.Text):lower()
+                        if txt:find("captcha") or txt:find("anti%-bot") or txt:find("antibot") or txt:find("are you a robot") or txt:find("human verification") or txt:find("afk check") then
+                            hasCaptchaPhrase = true
+                            candidateContainer = desc.Parent
                         end
                     end
                 end
             end
+
+            -- Require explicit captcha GUI name OR explicit captcha text (never trigger on normal chat boxes!)
+            if isExplicitCaptchaGui or hasCaptchaPhrase then
+                if candidateContainer and candidateContainer.Parent and candidateContainer.Parent:IsA("Frame") then
+                    return candidateContainer.Parent
+                end
+                return gui
+            end
         end
     end
 
-    return bestContainer
+    return nil
 end
 
 local function EvaluateSimpleMath(text)
@@ -1637,28 +1619,18 @@ local function FireAllCaptchaRemotes(answer)
     end
 end
 
-local function SubmitTextBoxEntry(inputBox, answerStr, submitBtn)
+local function SubmitTextBoxEntryMobileSafe(inputBox, answerStr, submitBtn)
     if not inputBox then return end
     pcall(function()
-        inputBox:CaptureFocus()
-        task.wait(0.06)
+        -- Set Text directly WITHOUT CaptureFocus() so Android/iOS keyboard never pops up!
         inputBox.Text = answerStr
         if firesignal then
             pcall(function() firesignal(inputBox:GetPropertyChangedSignal("Text")) end)
+            pcall(function() firesignal(inputBox.FocusLost, true) end)
         end
-        task.wait(0.08)
-        inputBox:ReleaseFocus(true)
     end)
 
-    if VirtualInputManager then
-        pcall(function()
-            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
-            task.wait(0.03)
-            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
-        end)
-    end
-
-    task.wait(0.12)
+    task.wait(0.08)
     if submitBtn then
         ClickGuiButton(submitBtn)
     end
@@ -1666,7 +1638,7 @@ end
 
 local function SolveCaptcha()
     if not getgenv().AAConfig.CaptchaBypass then return false end
-    if (os.clock() - LastCaptchaAttempt) < 1.0 then return false end
+    if (os.clock() - LastCaptchaAttempt) < 1.5 then return false end
 
     local captchaContainer = FindActiveCaptchaContainer()
     if not captchaContainer then
@@ -1709,7 +1681,7 @@ local function SolveCaptcha()
                 elseif compact:match("^%d%d%d%d+$") then
                     codeText = compact
                 elseif not codeText and #compact >= 4 and #compact <= 8 and compact:match("^[A-Za-z0-9]+$") then
-                    if not ContainsCaptchaKeyword(lower) and lower ~= "submit" and lower ~= "confirm" and lower ~= "enter" and lower ~= "verify" then
+                    if lower ~= "captcha" and lower ~= "verify" and lower ~= "submit" and lower ~= "confirm" and lower ~= "enter" then
                         codeText = compact
                     end
                 end
@@ -1736,7 +1708,7 @@ local function SolveCaptcha()
     local finalAnswer = mathAnswer or codeText
 
     if finalAnswer and inputBox then
-        SubmitTextBoxEntry(inputBox, tostring(finalAnswer), submitBtn)
+        SubmitTextBoxEntryMobileSafe(inputBox, tostring(finalAnswer), submitBtn)
         FireAllCaptchaRemotes(finalAnswer)
         return true
     end
@@ -1749,7 +1721,7 @@ local function SolveCaptcha()
             local childTxt = childLbl and StripRichText(childLbl.Text):lower() or ""
             if btnTxt == targetLower or childTxt == targetLower or btn.Name:lower() == targetLower then
                 ClickGuiButton(btn)
-                task.wait(0.15)
+                task.wait(0.1)
                 if submitBtn then ClickGuiButton(submitBtn) end
                 FireAllCaptchaRemotes(finalAnswer)
                 return true
@@ -1786,7 +1758,7 @@ local function SolveCaptcha()
                     if meta:find(word, 1, true) then
                         ClickGuiButton(btn)
                         clickedAny = true
-                        task.wait(0.18)
+                        task.wait(0.15)
                         break
                     end
                 end
@@ -1795,21 +1767,11 @@ local function SolveCaptcha()
 
         if clickedAny then
             if submitBtn then
-                task.wait(0.2)
+                task.wait(0.15)
                 ClickGuiButton(submitBtn)
             end
             return true
         end
-    end
-
-    if CaptchaAttemptCount >= 3 and #clickableChoices > 0 then
-        local pick = clickableChoices[((CaptchaAttemptCount - 1) % #clickableChoices) + 1]
-        ClickGuiButton(pick)
-        if submitBtn then
-            task.wait(0.15)
-            ClickGuiButton(submitBtn)
-        end
-        return true
     end
 
     return false
@@ -1862,10 +1824,11 @@ local function RunBannerRoutine()
     return true
 end
 
--- 13. MODULE: LOBBY & MATCHMAKING (FULL WORKSPACE POD DISCOVERY + PATHFIND/TOUCH + QUEUE)
+-- 13. MODULE: LOBBY & MATCHMAKING (CACHED POD SCAN + INSTANT CFrame TP + TOUCH)
 local LobbySearchStartTime = 0
 local LastPodMoveTime = 0
 local IsWalkingToPod = false
+local CachedPodResults = {}
 
 local function GetPartFromInstance(inst)
     if not inst then return nil end
@@ -1882,6 +1845,12 @@ local function GetPartFromInstance(inst)
 end
 
 local function FindBestLobbyPod(keywords, preferredPodName)
+    local cacheKey = tostring(preferredPodName or "") .. "|" .. table.concat(keywords, ",")
+    local cached = CachedPodResults[cacheKey]
+    if cached and cached.part and cached.part.Parent and (os.clock() - cached.time) < 10 then
+        return cached.part, cached.owner
+    end
+
     local searchRoots = {}
     local lobbyFolder = workspace:FindFirstChild("_lobby") or workspace:FindFirstChild("Lobby")
     if lobbyFolder then table.insert(searchRoots, lobbyFolder) end
@@ -1894,7 +1863,6 @@ local function FindBestLobbyPod(keywords, preferredPodName)
         if clean ~= "" then table.insert(lowerKws, clean) end
     end
 
-    -- 1. Exact pod name match first (e.g., Story_Pod_1, SummerEvent_Pod_1)
     if preferredPodName and preferredPodName ~= "" then
         local exactNeedle = preferredPodName:lower()
         for _, root in ipairs(searchRoots) do
@@ -1902,6 +1870,7 @@ local function FindBestLobbyPod(keywords, preferredPodName)
                 if obj.Name:lower() == exactNeedle or obj.Name:lower():find(exactNeedle, 1, true) then
                     local part = GetPartFromInstance(obj)
                     if part and part.Position.Y > -200 then
+                        CachedPodResults[cacheKey] = { part = part, owner = obj, time = os.clock() }
                         return part, obj
                     end
                 end
@@ -1909,7 +1878,6 @@ local function FindBestLobbyPod(keywords, preferredPodName)
         end
     end
 
-    -- 2. Score-based scan across pod models, pads, doors, and BillboardGui/SurfaceGui labels
     local bestPart = nil
     local bestOwner = nil
     local bestScore = -1
@@ -1927,7 +1895,7 @@ local function FindBestLobbyPod(keywords, preferredPodName)
         end
         if not matchedKw then return end
 
-        if lower:find("pod") or lower:find("pad") or lower:find("portal") or lower:find("door") or lower:find("elevator") or lower:find("teleporter") or lower:find("zone") or lower:find("queue") then
+        if lower:find("pod") or lower:find("pad") or lower:find("portal") or lower:find("door") or lower:find("elevator") or lower:find("teleporter") or lower:find("zone") or lower:find("queue") or lower:find("event") then
             score = score + 30
         end
         if ownerObj:FindFirstChildWhichIsA("TouchTransmitter", true) or part:FindFirstChildWhichIsA("TouchTransmitter", true) then
@@ -1936,7 +1904,6 @@ local function FindBestLobbyPod(keywords, preferredPodName)
         if lower:find("inprogress") or lower:find("full") or lower:find("locked") then
             score = score - 40
         end
-        -- Prefer empty/open pods (often numbered _1 or without active player occupant)
         if lower:find("_1") or lower:find("pod1") then
             score = score + 10
         end
@@ -1968,6 +1935,10 @@ local function FindBestLobbyPod(keywords, preferredPodName)
         if bestPart then break end
     end
 
+    if bestPart then
+        CachedPodResults[cacheKey] = { part = bestPart, owner = bestOwner, time = os.clock() }
+    end
+
     return bestPart, bestOwner
 end
 
@@ -1988,7 +1959,7 @@ local function TriggerPodTouch(targetPart, targetOwner)
         for _, p in ipairs(touchParts) do
             pcall(function()
                 firetouchinterest(hrp, p, 0)
-                task.wait(0.05)
+                task.wait(0.03)
                 firetouchinterest(hrp, p, 1)
             end)
         end
@@ -2051,37 +2022,33 @@ local function MoveToLobbyPod(keywords, preferredPodName)
     end
     LastPodMoveTime = os.clock()
 
-    local method = getgenv().AAConfig.LobbyMoveMethod or "Hybrid"
-    local destPos = targetPart.Position + Vector3.new(0, 3, 0)
+    local method = getgenv().AAConfig.LobbyMoveMethod or "Teleport"
+    local destCFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
 
-    if method == "Teleport" then
-        char:PivotTo(CFrame.new(destPos))
-        task.wait(0.15)
-        TriggerPodTouch(targetPart, targetOwner)
-        return true
-    elseif method == "Walk" then
+    if method == "Walk" then
         task.spawn(function()
-            if WalkToPosition(destPos) then
+            if WalkToPosition(destCFrame.Position) then
+                TriggerPodTouch(targetPart, targetOwner)
+            end
+        end)
+        return true
+    elseif method == "Hybrid" and dist < 40 then
+        task.spawn(function()
+            if WalkToPosition(destCFrame.Position) then
+                TriggerPodTouch(targetPart, targetOwner)
+            else
+                hrp.CFrame = destCFrame
+                char:PivotTo(destCFrame)
                 TriggerPodTouch(targetPart, targetOwner)
             end
         end)
         return true
     else
-        -- Hybrid: pathfind/walk if close (< 45 studs), otherwise pivot + fire touch
-        if dist < 45 then
-            task.spawn(function()
-                if WalkToPosition(destPos) then
-                    TriggerPodTouch(targetPart, targetOwner)
-                else
-                    char:PivotTo(CFrame.new(destPos))
-                    TriggerPodTouch(targetPart, targetOwner)
-                end
-            end)
-        else
-            char:PivotTo(CFrame.new(destPos))
-            task.wait(0.15)
-            TriggerPodTouch(targetPart, targetOwner)
-        end
+        -- Direct HRP CFrame + PivotTo (reliable on mobile executors)
+        hrp.CFrame = destCFrame
+        char:PivotTo(destCFrame)
+        task.wait(0.12)
+        TriggerPodTouch(targetPart, targetOwner)
         return true
     end
 end
@@ -2186,14 +2153,14 @@ local function ConfirmLobbySelectionGui(keywords)
     local kwList = type(keywords) == "table" and keywords or { tostring(keywords) }
 
     for _, gui in ipairs(PlayerGui:GetChildren()) do
-        if gui:IsA("ScreenGui") and gui.Enabled and gui.Name ~= "AAModernHubUI" then
+        if gui:IsA("ScreenGui") and gui.Enabled and not IsExcludedGuiName(gui.Name) then
             for _, desc in ipairs(gui:GetDescendants()) do
                 if desc:IsA("GuiButton") and IsGuiVisibleInTree(desc) then
                     local txt = (desc.Name .. " " .. (desc:IsA("TextButton") and StripRichText(desc.Text) or "")):lower()
                     for _, kw in ipairs(kwList) do
                         if kw ~= "" and txt:find(kw:lower(), 1, true) then
                             ClickGuiButton(desc)
-                            task.wait(0.1)
+                            task.wait(0.08)
                             break
                         end
                     end
@@ -2216,12 +2183,12 @@ local function QueueSoloModePod()
         local podName = podObj and podObj.Name or cfg.StoryPod
 
         MoveToLobbyPod({"story", tostring(cfg.StoryWorld)}, podName)
-        task.wait(0.35)
+        task.wait(0.25)
         FireEndpoint({"request_join_lobby", "join_lobby"}, podName)
-        task.wait(0.35)
+        task.wait(0.25)
         ConfirmLobbySelectionGui({cfg.StoryWorld, "act " .. tostring(cfg.StoryAct), cfg.StoryDifficulty})
         FireEndpoint({"request_match_making", "match_making"}, podName, levelId, true, cfg.StoryDifficulty)
-        task.wait(0.35)
+        task.wait(0.25)
         FireEndpoint({"request_start_game", "start_game"}, podName)
 
     elseif mode == "SummerEvent" then
@@ -2229,9 +2196,9 @@ local function QueueSoloModePod()
         local podName = podObj and podObj.Name or "SummerEvent_Pod_1"
 
         MoveToLobbyPod({"summer", "event", "pearl"}, podName)
-        task.wait(0.35)
+        task.wait(0.25)
         FireEndpoint({"request_join_lobby", "join_lobby"}, podName)
-        task.wait(0.35)
+        task.wait(0.25)
         ConfirmLobbySelectionGui({"summer", "event"})
         FireEndpoint({"request_start_game", "start_game"}, podName)
 
@@ -2240,9 +2207,9 @@ local function QueueSoloModePod()
         local podName = podObj and podObj.Name or "MistyVillage_Pod_1"
 
         MoveToLobbyPod({"misty", "village", "dawn"}, podName)
-        task.wait(0.35)
+        task.wait(0.25)
         FireEndpoint({"request_join_lobby", "join_lobby"}, podName)
-        task.wait(0.35)
+        task.wait(0.25)
         ConfirmLobbySelectionGui({"misty", "village"})
         FireEndpoint({"request_start_game", "start_game"}, podName)
 
@@ -2251,7 +2218,7 @@ local function QueueSoloModePod()
         local podName = podObj and podObj.Name or "InfinityCastle_Pod_1"
 
         MoveToLobbyPod({"infinity", "castle"}, podName)
-        task.wait(0.35)
+        task.wait(0.25)
         ConfirmLobbySelectionGui({"infinity", "castle"})
         FireEndpoint({"request_start_infinity_castle", "infinity_castle"}, podName)
     end
@@ -2392,7 +2359,7 @@ local function GetEquippedUnitSlots()
     end
 
     if #slots == 0 and PlayerGui then
-        local hotbar = PlayerGui:FindFirstChild("SpawnUnitUI", true) or PlayerGui:FindFirstChild("Hotbar", true)
+        local hotbar = PlayerGui:FindFirstChild("SpawnUnitUI") or PlayerGui:FindFirstChild("Hotbar")
         if hotbar then
             for _, btn in ipairs(hotbar:GetDescendants()) do
                 if btn:IsA("GuiButton") and btn.Visible then
@@ -2443,7 +2410,7 @@ local function RunUnitRoutine()
                 end
 
                 FireEndpoint({"spawn_unit", "place_unit"}, slot.id, CFrame.new(finalPos))
-                task.wait(0.2)
+                task.wait(0.15)
             end
         end
     end
@@ -2485,7 +2452,7 @@ local function RunMatchFlow()
     end
 
     if (cfg.SummerVoteTsunami or cfg.AutoPickModifierCard) and PlayerGui then
-        local cardGui = PlayerGui:FindFirstChild("ModifierCards", true) or PlayerGui:FindFirstChild("WeatherVote", true)
+        local cardGui = PlayerGui:FindFirstChild("ModifierCards") or PlayerGui:FindFirstChild("WeatherVote")
         if cardGui and IsGuiVisibleInTree(cardGui) then
             for _, btn in ipairs(cardGui:GetDescendants()) do
                 if btn:IsA("GuiButton") and IsGuiVisibleInTree(btn) then
@@ -2548,11 +2515,11 @@ task.spawn(function()
                 ActivityLabelRef.Text = playText
             end
         end
-        task.wait(0.1)
+        task.wait(0.25)
     end
 end)
 
--- 19. MAIN EXECUTION LOOP
+-- 19. MAIN EXECUTION LOOP (THROTTLED FOR MOBILE FPS STABILITY)
 task.spawn(function()
     while true do
         local cfg = getgenv().AAConfig
@@ -2585,6 +2552,6 @@ task.spawn(function()
                 end
             end)
         end
-        task.wait(0.25)
+        task.wait(0.6)
     end
 end)
