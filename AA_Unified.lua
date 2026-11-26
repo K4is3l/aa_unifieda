@@ -1,5 +1,5 @@
 -- ============================================================================
--- ANIME ADVENTURES (UPD 21.5+) - UNIFIED AUTO-FARM & CONSOLIDATED MACRO PANEL
+-- ANIME ADVENTURES (UPD 21.5+) - FULL COMPILED AUTO-FARM & MACRO PANEL
 -- Save as 'AA_Unified.lua' in your executor's 'autoexec' and 'workspace' folders.
 -- ============================================================================
 
@@ -1172,7 +1172,6 @@ local function CreateStyledControlGui()
     local tabPlace = CreateTab("Placement")
     local refreshPlacementMode = AddDropdownCycle(tabPlace, "Placement Mode:", "PlacementMode", {"Percentage", "Macro"})
 
-    -- UNIFIED MACRO STUDIO CARD (ALL CONTROLS IN ONE AREA)
     local macroCard = Instance.new("Frame")
     macroCard.Name = "MacroStudioCard"
     macroCard.Size = UDim2.new(1, -4, 0, 134)
@@ -1246,7 +1245,6 @@ local function CreateStyledControlGui()
         UpdateIdleMacroStatus()
     end)
 
-    -- 2x2 BUTTON GRID INSIDE MACRO STUDIO (START/USE, RECORD, SAVE, CLEAR)
     local gridContainer = Instance.new("Frame")
     gridContainer.Size = UDim2.new(1, -20, 0, 62)
     gridContainer.Position = UDim2.new(0, 10, 0, 65)
@@ -1417,7 +1415,9 @@ end
 
 CreateStyledControlGui()
 
--- 11. MODULE: CAPTCHA SOLVER (MULTI-ROOT SCAN, RICHTEXT STRIP, NUMERIC/TEXT + GRID)
+-- 11. MODULE: CAPTCHA SOLVER (DEEP SCAN, SPLIT-CHAR, MATH, IMAGE GRID & REMOTE)
+local LastCaptchaAttempt = 0
+
 local function StripRichText(str)
     return tostring(str or ""):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
@@ -1426,10 +1426,27 @@ local function IsGuiVisibleInTree(inst)
     local curr = inst
     while curr and curr ~= game do
         if curr:IsA("ScreenGui") and not curr.Enabled then return false end
+        if curr:IsA("SurfaceGui") and not curr.Enabled then return false end
+        if curr:IsA("BillboardGui") and not curr.Enabled then return false end
         if curr:IsA("GuiObject") and not curr.Visible then return false end
         curr = curr.Parent
     end
     return true
+end
+
+local CAPTCHA_KEYWORDS = {
+    "captcha", "verify", "verification", "security", "human",
+    "bot", "antibot", "anti_bot", "afk", "check", "robot", "prove"
+}
+
+local function ContainsCaptchaKeyword(str)
+    local lower = tostring(str or ""):lower()
+    for _, kw in ipairs(CAPTCHA_KEYWORDS) do
+        if lower:find(kw, 1, true) then
+            return true
+        end
+    end
+    return false
 end
 
 local function FindActiveCaptchaContainer()
@@ -1438,22 +1455,34 @@ local function FindActiveCaptchaContainer()
         if root then
             for _, gui in ipairs(root:GetChildren()) do
                 if gui:IsA("ScreenGui") and gui.Enabled and gui.Name ~= "AAModernHubUI" then
-                    local gName = gui.Name:lower()
-                    if gName:find("captcha") or gName:find("verify") or gName:find("verification") or gName:find("security") or gName:find("bot") then
+                    if ContainsCaptchaKeyword(gui.Name) then
                         return gui
                     end
-                    local hasBox, hasConfirm = false, false
+
+                    local hasBox = false
+                    local hasCaptchaText = false
+                    local hasConfirm = false
+
                     for _, desc in ipairs(gui:GetDescendants()) do
-                        if desc:IsA("TextBox") and IsGuiVisibleInTree(desc) then
-                            hasBox = true
-                        elseif desc:IsA("GuiButton") and IsGuiVisibleInTree(desc) then
-                            local bn = (desc.Name .. " " .. (desc:IsA("TextButton") and desc.Text or "")):lower()
-                            if bn:find("submit") or bn:find("verify") or bn:find("confirm") then
-                                hasConfirm = true
+                        if IsGuiVisibleInTree(desc) then
+                            if desc:IsA("TextBox") then
+                                hasBox = true
+                            elseif desc:IsA("TextLabel") or desc:IsA("TextButton") then
+                                local txt = StripRichText(desc.Text)
+                                if ContainsCaptchaKeyword(desc.Name) or ContainsCaptchaKeyword(txt) then
+                                    hasCaptchaText = true
+                                end
+                                if desc:IsA("GuiButton") then
+                                    local bn = (desc.Name .. " " .. txt):lower()
+                                    if bn:find("submit") or bn:find("verify") or bn:find("confirm") or bn:find("enter") or bn:find("ok") then
+                                        hasConfirm = true
+                                    end
+                                end
                             end
                         end
                     end
-                    if hasBox and hasConfirm then
+
+                    if (hasBox and (hasConfirm or hasCaptchaText)) or (hasCaptchaText and hasConfirm) then
                         return gui
                     end
                 end
@@ -1463,75 +1492,186 @@ local function FindActiveCaptchaContainer()
     return nil
 end
 
+local function EvaluateSimpleMath(text)
+    local a, op, b = text:match("(%d+)%s*([%+%-xX%*/])%s*(%d+)")
+    if not a or not b then return nil end
+    local n1, n2 = tonumber(a), tonumber(b)
+    if not n1 or not n2 then return nil end
+
+    if op == "+" then return tostring(n1 + n2)
+    elseif op == "-" then return tostring(n1 - n2)
+    elseif op == "*" or op == "x" or op == "X" then return tostring(n1 * n2)
+    elseif op == "/" and n2 ~= 0 then return tostring(math.floor(n1 / n2))
+    end
+    return nil
+end
+
+local function ExtractSplitCharacterCode(container)
+    local charLabels = {}
+    for _, obj in ipairs(container:GetDescendants()) do
+        if obj:IsA("TextLabel") and IsGuiVisibleInTree(obj) then
+            local clean = StripRichText(obj.Text):gsub("%s+", "")
+            if #clean == 1 and clean:match("^[A-Za-z0-9]$") and obj.AbsoluteSize.X > 4 and obj.AbsoluteSize.Y > 4 then
+                table.insert(charLabels, {
+                    char = clean,
+                    x = obj.AbsolutePosition.X,
+                    y = obj.AbsolutePosition.Y
+                })
+            end
+        end
+    end
+
+    if #charLabels < 4 or #charLabels > 8 then return nil end
+
+    table.sort(charLabels, function(a, b)
+        if math.abs(a.y - b.y) > 18 then
+            return a.y < b.y
+        end
+        return a.x < b.x
+    end)
+
+    local built = {}
+    for _, item in ipairs(charLabels) do
+        table.insert(built, item.char)
+    end
+    return table.concat(built)
+end
+
+local function FireAllCaptchaRemotes(answer)
+    local patterns = {
+        "submit_captcha", "verify_captcha", "captcha",
+        "afk_verify", "anti_afk", "verification", "verify"
+    }
+    for _, pat in ipairs(patterns) do
+        FireEndpoint(pat, answer)
+    end
+end
+
 local function SolveCaptcha()
     if not getgenv().AAConfig.CaptchaBypass then return false end
+    if (os.clock() - LastCaptchaAttempt) < 1.2 then return false end
 
     local captchaGui = FindActiveCaptchaContainer()
     if not captchaGui then return false end
 
+    LastCaptchaAttempt = os.clock()
+
     local codeText = nil
+    local mathAnswer = nil
     local inputBox = nil
     local submitBtn = nil
     local promptText = ""
+    local clickableChoices = {}
 
     for _, obj in ipairs(captchaGui:GetDescendants()) do
-        if obj:IsA("TextLabel") and IsGuiVisibleInTree(obj) then
-            local raw = StripRichText(obj.Text)
-            local lower = raw:lower()
-            local compact = raw:gsub("%s+", "")
+        if IsGuiVisibleInTree(obj) then
+            if obj:IsA("TextLabel") then
+                local raw = StripRichText(obj.Text)
+                local lower = raw:lower()
+                local compact = raw:gsub("%s+", "")
 
-            if lower:find("select") or lower:find("click") or lower:find("enter") or lower:find("type") then
-                promptText = lower
-            end
+                if lower:find("select") or lower:find("click") or lower:find("choose") or lower:find("pick") or lower:find("tap") or lower:find("find") then
+                    promptText = lower
+                end
 
-            if compact:match("^%d%d%d%d+$") then
-                codeText = compact
-            elseif not codeText and #compact >= 4 and #compact <= 7 and compact:match("^[A-Za-z0-9]+$") then
-                if lower ~= "submit" and lower ~= "verify" and lower ~= "confirm" and lower ~= "captcha" then
+                local mAns = EvaluateSimpleMath(raw)
+                if mAns then
+                    mathAnswer = mAns
+                end
+
+                local extractedCode = raw:match("[Cc]ode%s*:%s*([A-Za-z0-9]+)")
+                    or raw:match("[Tt]ype%s+['\"]?([A-Za-z0-9]+)['\"]?")
+                    or raw:match("[Ee]nter%s+['\"]?([A-Za-z0-9]+)['\"]?")
+                if extractedCode and #extractedCode >= 3 then
+                    codeText = extractedCode
+                elseif compact:match("^%d%d%d%d+$") then
                     codeText = compact
+                elseif not codeText and #compact >= 4 and #compact <= 8 and compact:match("^[A-Za-z0-9]+$") then
+                    if not ContainsCaptchaKeyword(lower) and lower ~= "submit" and lower ~= "confirm" and lower ~= "enter" then
+                        codeText = compact
+                    end
                 end
-            end
-        elseif obj:IsA("TextBox") and IsGuiVisibleInTree(obj) then
-            inputBox = obj
-        elseif obj:IsA("GuiButton") and IsGuiVisibleInTree(obj) then
-            local n = (obj.Name .. " " .. (obj:IsA("TextButton") and StripRichText(obj.Text) or "")):lower()
-            if n:find("submit") or n:find("verify") or n:find("confirm") then
-                submitBtn = obj
+
+            elseif obj:IsA("TextBox") then
+                inputBox = obj
+
+            elseif obj:IsA("GuiButton") then
+                local btnTxt = obj:IsA("TextButton") and StripRichText(obj.Text) or ""
+                local combined = (obj.Name .. " " .. btnTxt):lower()
+                if combined:find("submit") or combined:find("verify") or combined:find("confirm") or combined:find("done") or combined:find("check") then
+                    submitBtn = obj
+                else
+                    table.insert(clickableChoices, obj)
+                end
             end
         end
     end
 
-    if codeText and inputBox then
+    if not codeText and not mathAnswer then
+        codeText = ExtractSplitCharacterCode(captchaGui)
+    end
+
+    local finalAnswer = mathAnswer or codeText
+
+    if finalAnswer and inputBox then
         inputBox:CaptureFocus()
-        task.wait(0.05)
-        inputBox.Text = codeText
-        task.wait(0.1)
+        task.wait(0.06)
+        inputBox.Text = tostring(finalAnswer)
+        task.wait(0.08)
         inputBox:ReleaseFocus(true)
-        task.wait(0.15)
+        task.wait(0.12)
 
         if submitBtn then
             ClickGuiButton(submitBtn)
         end
-        FireEndpoint({"submit_captcha", "verify_captcha", "captcha"}, codeText)
-        task.wait(0.5)
+        FireAllCaptchaRemotes(finalAnswer)
         return true
     end
 
-    if promptText ~= "" then
-        for _, obj in ipairs(captchaGui:GetDescendants()) do
-            if obj:IsA("ImageButton") and IsGuiVisibleInTree(obj) then
-                local tag = tostring(obj:GetAttribute("Category") or obj:GetAttribute("Type") or obj.Name):lower()
-                if tag ~= "" and promptText:find(tag, 1, true) then
-                    ClickGuiButton(obj)
-                    task.wait(0.2)
+    if finalAnswer and #clickableChoices > 0 then
+        local targetLower = tostring(finalAnswer):lower()
+        for _, btn in ipairs(clickableChoices) do
+            local btnTxt = btn:IsA("TextButton") and StripRichText(btn.Text):lower() or ""
+            if btnTxt == targetLower or btn.Name:lower() == targetLower then
+                ClickGuiButton(btn)
+                task.wait(0.15)
+                if submitBtn then ClickGuiButton(submitBtn) end
+                return true
+            end
+        end
+    end
+
+    if promptText ~= "" and #clickableChoices > 0 then
+        local clickedAny = false
+        for _, btn in ipairs(clickableChoices) do
+            local meta = table.concat({
+                tostring(btn:GetAttribute("Category") or ""),
+                tostring(btn:GetAttribute("Type") or ""),
+                tostring(btn:GetAttribute("Item") or ""),
+                tostring(btn:GetAttribute("Id") or ""),
+                btn.Name,
+                btn:IsA("TextButton") and StripRichText(btn.Text) or ""
+            }, " "):lower()
+
+            for word in promptText:gmatch("%a+") do
+                if #word >= 3 and word ~= "select" and word ~= "click" and word ~= "all" and word ~= "the" and word ~= "with" and word ~= "images" then
+                    if meta:find(word, 1, true) then
+                        ClickGuiButton(btn)
+                        clickedAny = true
+                        task.wait(0.18)
+                        break
+                    end
                 end
             end
         end
-        if submitBtn then
-            task.wait(0.25)
-            ClickGuiButton(submitBtn)
+
+        if clickedAny then
+            if submitBtn then
+                task.wait(0.2)
+                ClickGuiButton(submitBtn)
+            end
+            return true
         end
-        return true
     end
 
     return false
