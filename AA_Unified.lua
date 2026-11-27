@@ -1,5 +1,5 @@
 -- ============================================================================
--- ANIME ADVENTURES - UNIFIED HUB (DARK / ORANGE TABBED UI + MACRO + AUTO PLAY)
+-- ANIME ADVENTURES - UNIFIED HUB (DARK / ORANGE TABBED UI + SLIDERS + MACRO)
 -- Save as 'AA_Unified_Hub.lua' in your executor's 'workspace' and 'autoexec'.
 -- ============================================================================
 
@@ -27,7 +27,7 @@ local PlayerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui") or LocalPlayer:
 local IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
 -- ============================================================================
--- 1. SAFE EXECUTOR FILE & TELEPORT WRAPPERS
+-- 1. SAFE EXECUTOR FILE, CLIPBOARD & TELEPORT WRAPPERS
 -- ============================================================================
 local function SafeIsFile(path)
     if type(isfile) == "function" then
@@ -53,14 +53,32 @@ local function SafeWriteFile(path, content)
     end
 end
 
-local function SafeListFiles()
+local function SafeDeleteFile(path)
+    if type(delfile) == "function" and SafeIsFile(path) then
+        pcall(delfile, path)
+    end
+end
+
+local function SafeSetClipboard(text)
+    if type(setclipboard) == "function" and type(text) == "string" then
+        pcall(setclipboard, text)
+        return true
+    end
+    return false
+end
+
+local function ListSavedMacros()
     local names = {}
+    local seen = {}
     if type(listfiles) == "function" then
         local ok, files = pcall(listfiles, "")
         if ok and type(files) == "table" then
             for _, f in ipairs(files) do
                 local m = tostring(f):match("AAMacro_([%w_%-]+)%.json$")
-                if m then table.insert(names, m) end
+                if m and not seen[m] then
+                    seen[m] = true
+                    table.insert(names, m)
+                end
             end
         end
     end
@@ -93,14 +111,23 @@ end)
 -- 2. PERSISTENT CONFIGURATION
 -- ============================================================================
 local CONFIG_FILE = "AA_UnifiedHub_Config.json"
+local STORY_MAPS = {
+    "Planet Greenie",
+    "Walled City",
+    "Snowy Town",
+    "Sand Village",
+    "Navy Bay",
+    "Fiend City",
+    "Spirit World",
+    "Ant Kingdom"
+}
+
 local Config = {
-    -- Home / Session Stats
     Runs = 0,
     CurrentWave = 0,
 
     -- Macro (Record / Play & Macro Maps)
     SelectedMacro = "Default",
-    NewMacroName = "",
     RecordMacro = false,
     PlayMacro = false,
     EquipMacroUnits = false,
@@ -119,29 +146,32 @@ local Config = {
 
     -- Auto Play (All Modes & Event)
     AutoPlay = false,
-    PathPosition = 1,               -- 1% to 100%
-    Spacing = 1,                    -- studs
+    PathPosition = 1,               -- 1..100 (%)
+    Spacing = 1,                    -- 1..20 (studs)
     CoverAllLanes = true,
     PlaceNearBuffers = false,
     WeatherAware = true,
+    ShowPlacementGrid = false,
     FarmUnitsFirst = true,
     AutoUpgrade = true,
     UpgradeWhileSaving = true,
+    GriffinForm = "Off",
     WalkLikePlayer = false,
 
     -- Event Auto Play (Summer Hunt)
     UseEventInSummer = false,
     EventPathPosition = 50,
+    EventSpacing = 1,
 
     -- Specific Unit Settings (Slots 1-6)
     SelectedUnitSlot = 1,
     UnitSlots = {
-        [1] = { Priority = 1, MaxPlace = 1, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false },
-        [2] = { Priority = 2, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false },
-        [3] = { Priority = 3, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false },
-        [4] = { Priority = 4, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false },
-        [5] = { Priority = 5, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false },
-        [6] = { Priority = 6, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false }
+        [1] = { Name = "Slot 1", Priority = 1, MaxPlace = 1, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false },
+        [2] = { Name = "Slot 2", Priority = 2, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false },
+        [3] = { Name = "Slot 3", Priority = 3, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false },
+        [4] = { Name = "Slot 4", Priority = 4, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false },
+        [5] = { Name = "Slot 5", Priority = 5, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false },
+        [6] = { Name = "Slot 6", Priority = 6, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false }
     },
 
     -- Join: Castle / Events / Portals / Swordsmith & Misty Tower
@@ -159,13 +189,17 @@ local Config = {
     AutoPortal = false,
     AutoStartPortal = true,
     AutoNextPortal = true,
+    MostUsesLeftFirst = true,
     PortalMatchmaking = true,
 
     AutoSwordsmith = false,
     SwordsmithMatchmaking = true,
+    SwordsmithStage = "Best Available",
     BloodMoonWhenUp = true,
+    SkipStageAfterLosses = 0,
     AutoMistyTower = false,
     MistyMatchmaking = true,
+    RestAfterLosses = 3,
 
     -- Match / Game Automation
     AutoStartMatch = true,
@@ -186,7 +220,15 @@ local function LoadConfig()
                     if type(v) == "table" and type(data[k]) == "table" then
                         for subK, subV in pairs(v) do
                             if data[k][subK] ~= nil then
-                                v[subK] = data[k][subK]
+                                if type(subV) == "table" and type(data[k][subK]) == "table" then
+                                    for leafK, leafV in pairs(subV) do
+                                        if data[k][subK][leafK] ~= nil then
+                                            subV[leafK] = data[k][subK][leafK]
+                                        end
+                                    end
+                                else
+                                    v[subK] = data[k][subK]
+                                end
                             end
                         end
                     else
@@ -205,7 +247,7 @@ end
 LoadConfig()
 
 -- ============================================================================
--- 3. FUZZY REMOTES, GUI CLICKER & STATE HELPERS
+-- 3. GUI CONTAINER, CLICKER & FUZZY REMOTE HELPERS
 -- ============================================================================
 local function GetSafeGuiParent()
     if type(gethui) == "function" then
@@ -345,7 +387,7 @@ local function GetCurrentWave()
 end
 
 -- ============================================================================
--- 4. MACRO ENGINE (RECORD / PLAY BY MONEY OR TIME + STEP LIST)
+-- 4. MACRO ENGINE (RECORD / PLAY BY MONEY OR TIME + STEP LIST + IMPORT/EXPORT)
 -- ============================================================================
 local MacroEngine = {
     StartClock = 0,
@@ -353,8 +395,15 @@ local MacroEngine = {
     PlayIndex = 1,
     PlayStartClock = 0,
     Status = "idle",
-    Hooked = false
+    Hooked = false,
+    OnStepsChanged = nil
 }
+
+local function NotifyStepsChanged()
+    if type(MacroEngine.OnStepsChanged) == "function" then
+        pcall(MacroEngine.OnStepsChanged, MacroEngine.Steps)
+    end
+end
 
 local function GetMacroFilename(name)
     local clean = tostring(name or "Default"):gsub("[^%w_%-]", "_")
@@ -377,6 +426,29 @@ local function LoadMacroFile(name)
         return data.steps
     end
     return {}
+end
+
+local function ExportMacroJson(name, steps)
+    return HttpService:JSONEncode({
+        name = name,
+        steps = steps
+    })
+end
+
+local function ImportMacroJson(rawJson, targetName)
+    if type(rawJson) ~= "string" or rawJson == "" then return false, 0 end
+    local ok, decoded = pcall(function() return HttpService:JSONDecode(rawJson) end)
+    if not ok or type(decoded) ~= "table" then return false, 0 end
+    local list = type(decoded.steps) == "table" and decoded.steps or (decoded[1] and decoded or nil)
+    if not list then return false, 0 end
+    local name = (targetName and targetName ~= "") and targetName or (decoded.name or Config.SelectedMacro)
+    Config.SelectedMacro = name
+    MacroEngine.Steps = list
+    MacroEngine.PlayIndex = 1
+    SaveMacroFile(name, list)
+    SaveConfig()
+    NotifyStepsChanged()
+    return true, #list
 end
 
 local function GetOwnedUnits()
@@ -415,7 +487,7 @@ local function InstallMacroHook()
                 if typeof(self) == "Instance" and self:IsDescendantOf(ReplicatedStorage) then
                     local rName = self.Name:lower()
                     local t = os.clock() - MacroEngine.StartClock
-                    local wave = GetCurrentWave()
+                    local wave = math.max(1, GetCurrentWave())
                     local yen = GetCurrentYen()
 
                     if (rName:find("spawn") or rName:find("place")) and typeof(args[2]) == "CFrame" then
@@ -428,6 +500,7 @@ local function InstallMacroHook()
                             t = t,
                             pos = { cf.X, cf.Y, cf.Z }
                         })
+                        NotifyStepsChanged()
                     elseif rName:find("upgrade") and typeof(args[1]) == "Instance" then
                         table.insert(MacroEngine.Steps, {
                             action = "Upgrade",
@@ -437,6 +510,7 @@ local function InstallMacroHook()
                             yen = yen,
                             t = t
                         })
+                        NotifyStepsChanged()
                     elseif rName:find("sell") and typeof(args[1]) == "Instance" then
                         table.insert(MacroEngine.Steps, {
                             action = "Sell",
@@ -446,6 +520,7 @@ local function InstallMacroHook()
                             yen = yen,
                             t = t
                         })
+                        NotifyStepsChanged()
                     end
                 end
             end
@@ -465,6 +540,7 @@ local function StepMacroRuntime()
         MacroEngine.Steps = LoadMacroFile(Config.SelectedMacro)
         MacroEngine.PlayIndex = 1
         MacroEngine.PlayStartClock = os.clock()
+        NotifyStepsChanged()
     end
 
     if #MacroEngine.Steps == 0 then
@@ -539,14 +615,12 @@ local function StepLobbyJoinAndMatchmaking(rootGui)
         local desired = useMatchmaking and "find match" or "play here"
         local fallback = useMatchmaking and "play here" or "find match"
 
-        -- 1. Click "Find Match" or "Play Here" if "Join Matchmaking?" popup is open
         local confirmBtn = FindButtonByPhrase(desired, rootGui) or FindButtonByPhrase(fallback, rootGui)
         if confirmBtn then
             SafeClick(confirmBtn)
             return
         end
 
-        -- 2. Click mode card if "Where do you want to Play?" popup is open
         local modeBtn = FindButtonByPhrase(activeMode, rootGui)
         if modeBtn then
             SafeClick(modeBtn)
@@ -556,7 +630,6 @@ local function StepLobbyJoinAndMatchmaking(rootGui)
             return
         end
 
-        -- 3. Open Play prompt once per cooldown
         local playBtn = FindButtonByPhrase("play", rootGui)
         if playBtn then
             SafeClick(playBtn)
@@ -567,7 +640,7 @@ local function StepLobbyJoinAndMatchmaking(rootGui)
 end
 
 -- ============================================================================
--- 6. BIGFROOT-STYLE DARK + ORANGE TABBED UI
+-- 6. FULL DARK + ORANGE TABBED UI (SLIDERS, STEPS TABLE, MAP SELECTORS)
 -- ============================================================================
 local SessionStart = os.clock()
 
@@ -581,7 +654,7 @@ end
 
 local function BuildTabbedHub()
     local guiParent = GetSafeGuiParent()
-    if not guiParent then return end
+    if not guiParent then return nil end
 
     for _, container in ipairs({ guiParent, PlayerGui, CoreGui }) do
         if container then
@@ -606,16 +679,16 @@ local function BuildTabbedHub()
     sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     sg.Parent = guiParent
 
-    -- Top Floating Watermark Pill (Tap to open/close)
+    -- Top Floating Watermark Pill (Tap to toggle UI)
     local topPill = Instance.new("TextButton")
     topPill.Name = "TopPill"
-    topPill.Size = UDim2.new(0, 230, 0, 28)
-    topPill.Position = UDim2.new(0.5, -115, 0, 8)
+    topPill.Size = UDim2.new(0, 240, 0, 28)
+    topPill.Position = UDim2.new(0.5, -120, 0, 8)
     topPill.BackgroundColor3 = C_SIDEBAR
     topPill.TextColor3 = C_TEXT
     topPill.Font = Enum.Font.GothamSemibold
     topPill.TextSize = 12
-    topPill.Text = "AA Hub  •  Tap to toggle UI"
+    topPill.Text = "AA Unified  •  Tap to open/close"
     topPill.Active = true
     topPill.Draggable = true
     topPill.Parent = sg
@@ -625,8 +698,8 @@ local function BuildTabbedHub()
     pillStroke.Thickness = 1
 
     -- Main Window
-    local winW = IsMobile and 540 or 640
-    local winH = IsMobile and 340 or 410
+    local winW = IsMobile and 560 or 680
+    local winH = IsMobile and 345 or 425
     local main = Instance.new("Frame")
     main.Name = "MainWindow"
     main.Size = UDim2.new(0, winW, 0, winH)
@@ -645,9 +718,9 @@ local function BuildTabbedHub()
         main.Visible = not main.Visible
     end)
 
-    -- Left Sidebar
+    -- Sidebar
     local sidebar = Instance.new("Frame")
-    sidebar.Size = UDim2.new(0, 145, 1, 0)
+    sidebar.Size = UDim2.new(0, 152, 1, 0)
     sidebar.BackgroundColor3 = C_SIDEBAR
     sidebar.BorderSizePixel = 0
     sidebar.Parent = main
@@ -657,7 +730,7 @@ local function BuildTabbedHub()
     brand.Size = UDim2.new(1, -16, 0, 38)
     brand.Position = UDim2.new(0, 12, 0, 8)
     brand.BackgroundTransparency = 1
-    brand.Text = "AA Unified\nv2.0.0"
+    brand.Text = "AA Unified\nv2.1.0"
     brand.TextXAlignment = Enum.TextXAlignment.Left
     brand.TextColor3 = C_TEXT
     brand.Font = Enum.Font.GothamBold
@@ -675,10 +748,10 @@ local function BuildTabbedHub()
     local navList = Instance.new("UIListLayout", navScroll)
     navList.Padding = UDim.new(0, 4)
 
-    -- Right Content Area
+    -- Right Header & Page Container
     local header = Instance.new("TextLabel")
-    header.Size = UDim2.new(1, -165, 0, 34)
-    header.Position = UDim2.new(0, 158, 0, 8)
+    header.Size = UDim2.new(1, -172, 0, 34)
+    header.Position = UDim2.new(0, 164, 0, 8)
     header.BackgroundTransparency = 1
     header.Text = "Home"
     header.TextXAlignment = Enum.TextXAlignment.Left
@@ -688,8 +761,8 @@ local function BuildTabbedHub()
     header.Parent = main
 
     local pageHolder = Instance.new("Frame")
-    pageHolder.Size = UDim2.new(1, -162, 1, -48)
-    pageHolder.Position = UDim2.new(0, 154, 0, 42)
+    pageHolder.Size = UDim2.new(1, -168, 1, -48)
+    pageHolder.Position = UDim2.new(0, 160, 0, 42)
     pageHolder.BackgroundTransparency = 1
     pageHolder.Parent = main
 
@@ -720,7 +793,7 @@ local function BuildTabbedHub()
         end
         for name, btn in pairs(NavButtons) do
             local active = (name == pageName)
-            btn.BackgroundColor3 = active and Color3.fromRGB(45, 32, 24) or Color3.fromRGB(22, 20, 19)
+            btn.BackgroundColor3 = active and Color3.fromRGB(45, 32, 24) or C_SIDEBAR
             btn.TextColor3 = active and C_ACCENT or C_MUTED
         end
     end
@@ -743,8 +816,8 @@ local function BuildTabbedHub()
         return CreatePage(label)
     end
 
-    -- UI Component Builders
-    local function CreateSectionCard(parent, titleText)
+    -- UI Builders
+    local function CreateCard(parent, titleText)
         local card = Instance.new("Frame")
         card.Size = UDim2.new(1, -6, 0, 0)
         card.AutomaticSize = Enum.AutomaticSize.Y
@@ -814,16 +887,127 @@ local function BuildTabbedHub()
             onChanged(state)
             SaveConfig()
         end)
+
+        return {
+            Set = function(newState)
+                state = newState
+                pillBtn.BackgroundColor3 = state and C_ACCENT or C_CTRL
+                knob.Position = state and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+            end
+        }
     end
 
-    local function AddCycleDropdown(card, labelText, options, currentVal, onChanged)
+    local function AddSlider(card, labelText, minVal, maxVal, currentVal, suffix, onChanged)
+        local container = Instance.new("Frame")
+        container.Size = UDim2.new(1, 0, 0, 38)
+        container.BackgroundTransparency = 1
+        container.Parent = card
+
+        local topRow = Instance.new("Frame")
+        topRow.Size = UDim2.new(1, 0, 0, 18)
+        topRow.BackgroundTransparency = 1
+        topRow.Parent = container
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(0.7, 0, 1, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = labelText
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.TextColor3 = C_TEXT
+        lbl.Font = Enum.Font.Gotham
+        lbl.TextSize = 12
+        lbl.Parent = topRow
+
+        local valBox = Instance.new("TextLabel")
+        valBox.Size = UDim2.new(0.3, 0, 1, 0)
+        valBox.Position = UDim2.new(0.7, 0, 0, 0)
+        valBox.BackgroundColor3 = C_CTRL
+        valBox.Text = tostring(currentVal) .. (suffix or "")
+        valBox.TextColor3 = C_TEXT
+        valBox.Font = Enum.Font.GothamBold
+        valBox.TextSize = 11
+        valBox.Parent = topRow
+        Instance.new("UICorner", valBox).CornerRadius = UDim.new(0, 4)
+
+        local track = Instance.new("Frame")
+        track.Size = UDim2.new(1, 0, 0, 8)
+        track.Position = UDim2.new(0, 0, 0, 24)
+        track.BackgroundColor3 = C_CTRL
+        track.BorderSizePixel = 0
+        track.Parent = container
+        Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+
+        local fill = Instance.new("Frame")
+        fill.Size = UDim2.new(0, 0, 1, 0)
+        fill.BackgroundColor3 = C_ACCENT
+        fill.BorderSizePixel = 0
+        fill.Parent = track
+        Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+
+        local thumb = Instance.new("Frame")
+        thumb.Size = UDim2.new(0, 14, 0, 14)
+        thumb.Position = UDim2.new(0, -7, 0.5, -7)
+        thumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        thumb.Parent = fill
+        Instance.new("UICorner", thumb).CornerRadius = UDim.new(1, 0)
+
+        local dragging = false
+        local value = math.clamp(currentVal or minVal, minVal, maxVal)
+
+        local function ApplyValue(v, saveIt)
+            value = math.clamp(math.floor(v + 0.5), minVal, maxVal)
+            local alpha = (maxVal > minVal) and ((value - minVal) / (maxVal - minVal)) or 0
+            fill.Size = UDim2.new(alpha, 0, 1, 0)
+            valBox.Text = tostring(value) .. (suffix or "")
+            onChanged(value)
+            if saveIt then SaveConfig() end
+        end
+
+        ApplyValue(value, false)
+
+        local function UpdateFromInput(input)
+            local absPos = track.AbsolutePosition.X
+            local absSize = track.AbsoluteSize.X
+            if absSize <= 0 then return end
+            local rel = math.clamp((input.Position.X - absPos) / absSize, 0, 1)
+            ApplyValue(minVal + rel * (maxVal - minVal), false)
+        end
+
+        track.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                UpdateFromInput(input)
+            end
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                UpdateFromInput(input)
+            end
+        end)
+
+        UserInputService.InputEnded:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+                dragging = false
+                SaveConfig()
+            end
+        end)
+
+        return {
+            SetValue = function(v)
+                ApplyValue(v, false)
+            end
+        }
+    end
+
+    local function AddCycleSelector(card, labelText, getOptionsFn, currentVal, onChanged)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, 0, 0, 28)
         row.BackgroundTransparency = 1
         row.Parent = card
 
         local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(0.48, 0, 1, 0)
+        lbl.Size = UDim2.new(0.46, 0, 1, 0)
         lbl.BackgroundTransparency = 1
         lbl.Text = labelText
         lbl.TextXAlignment = Enum.TextXAlignment.Left
@@ -832,32 +1016,41 @@ local function BuildTabbedHub()
         lbl.TextSize = 12
         lbl.Parent = row
 
-        local idx = 1
-        for i, opt in ipairs(options) do
-            if opt == currentVal then idx = i end
-        end
-
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0.52, 0, 1, 0)
-        btn.Position = UDim2.new(0.48, 0, 0, 0)
+        btn.Size = UDim2.new(0.54, 0, 1, 0)
+        btn.Position = UDim2.new(0.46, 0, 0, 0)
         btn.BackgroundColor3 = C_CTRL
         btn.TextColor3 = C_TEXT
         btn.Font = Enum.Font.GothamSemibold
         btn.TextSize = 11
-        btn.Text = tostring(options[idx]) .. "  ▾"
+        btn.Text = tostring(currentVal or "--") .. "  ▾"
         btn.Parent = row
         Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
 
+        local selected = currentVal
         btn.MouseButton1Click:Connect(function()
-            idx = (idx % #options) + 1
-            local chosen = options[idx]
-            btn.Text = tostring(chosen) .. "  ▾"
-            onChanged(chosen)
+            local opts = type(getOptionsFn) == "function" and getOptionsFn() or getOptionsFn
+            if type(opts) ~= "table" or #opts == 0 then return end
+            local idx = 1
+            for i, o in ipairs(opts) do
+                if o == selected then idx = i end
+            end
+            idx = (idx % #opts) + 1
+            selected = opts[idx]
+            btn.Text = tostring(selected) .. "  ▾"
+            onChanged(selected)
             SaveConfig()
         end)
+
+        return {
+            Set = function(v)
+                selected = v
+                btn.Text = tostring(v) .. "  ▾"
+            end
+        }
     end
 
-    local function AddButton(card, text, colorOverride, callback)
+    local function AddButtonRow(card, text, colorOverride, callback)
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(1, 0, 0, 28)
         btn.BackgroundColor3 = colorOverride or C_CTRL
@@ -872,123 +1065,306 @@ local function BuildTabbedHub()
     end
 
     -- ========================================================================
-    -- TAB 1: HOME (Status, Stats, Quick Actions)
+    -- TAB 1: HOME
     -- ========================================================================
     local homePage = AddNavTab("Home")
-    local statusCard = CreateSectionCard(homePage, "Status & Session")
-    local statusReadout = Instance.new("TextLabel")
-    statusReadout.Size = UDim2.new(1, 0, 0, 42)
-    statusReadout.BackgroundTransparency = 1
-    statusReadout.TextXAlignment = Enum.TextXAlignment.Left
-    statusReadout.TextColor3 = C_TEXT
-    statusReadout.Font = Enum.Font.GothamSemibold
-    statusReadout.TextSize = 12
-    statusReadout.Text = "Session: 0m 0s  |  Features On: 0\nFPS: 60  |  Ping: 0 ms  |  Runs: 0  |  Macro Steps: 0"
-    statusReadout.Parent = statusCard
+    local statusCard = CreateCard(homePage, "Status & Session")
+    local statusLbl = Instance.new("TextLabel")
+    statusLbl.Size = UDim2.new(1, 0, 0, 42)
+    statusLbl.BackgroundTransparency = 1
+    statusLbl.TextXAlignment = Enum.TextXAlignment.Left
+    statusLbl.TextColor3 = C_TEXT
+    statusLbl.Font = Enum.Font.GothamSemibold
+    statusLbl.TextSize = 12
+    statusLbl.Text = "Session: 0m 0s  |  Features On: 0\nFPS: 60  |  Ping: 0 ms  |  Runs: 0  |  Wave: 0"
+    statusLbl.Parent = statusCard
 
-    local quickCard = CreateSectionCard(homePage, "Quick Actions")
-    AddButton(quickCard, "Load Last Config", C_CTRL, function()
+    local quickCard = CreateCard(homePage, "Quick Actions")
+    AddButtonRow(quickCard, "Copy Discord Invite", C_CTRL, function()
+        SafeSetClipboard("https://discord.gg/")
+    end)
+    AddButtonRow(quickCard, "Load Last Config", C_CTRL, function()
         LoadConfig()
     end)
-    AddButton(quickCard, "Toggle Watermark Pill", C_CTRL, function()
+    AddButtonRow(quickCard, "Toggle Watermark Pill", C_CTRL, function()
         topPill.Visible = not topPill.Visible
     end)
 
     -- ========================================================================
-    -- TAB 2: MACRO (Record / Play + Macro Maps)
+    -- TAB 2: MACRO (Record / Play + Steps Table + Macro Maps)
     -- ========================================================================
     local macroPage = AddNavTab("Macro")
-    local macroCtrlCard = CreateSectionCard(macroPage, "Macro > Record / Play")
+    local macroCard = CreateCard(macroPage, "Macro > Record / Play")
 
-    local macroBox = Instance.new("TextBox")
-    macroBox.Size = UDim2.new(1, 0, 0, 28)
-    macroBox.BackgroundColor3 = C_CTRL
-    macroBox.TextColor3 = C_TEXT
-    macroBox.PlaceholderText = "new macro name (e.g. SummerFarm)"
-    macroBox.Text = Config.SelectedMacro
-    macroBox.Font = Enum.Font.Gotham
-    macroBox.TextSize = 12
-    macroBox.ClearTextOnFocus = false
-    macroBox.Parent = macroCtrlCard
-    Instance.new("UICorner", macroBox).CornerRadius = UDim.new(0, 6)
-
-    AddButton(macroCtrlCard, "Create / Load Macro Name", C_CTRL, function()
-        local name = macroBox.Text ~= "" and macroBox.Text or "Default"
-        Config.SelectedMacro = name
-        MacroEngine.Steps = LoadMacroFile(name)
+    local macroSelector = AddCycleSelector(macroCard, "Macro", function()
+        return ListSavedMacros()
+    end, Config.SelectedMacro, function(chosen)
+        Config.SelectedMacro = chosen
+        MacroEngine.Steps = LoadMacroFile(chosen)
         MacroEngine.PlayIndex = 1
-        SaveConfig()
+        NotifyStepsChanged()
     end)
 
-    AddToggle(macroCtrlCard, "Record Macro", Config.RecordMacro, function(val)
+    local nameInput = Instance.new("TextBox")
+    nameInput.Size = UDim2.new(1, 0, 0, 28)
+    nameInput.BackgroundColor3 = C_CTRL
+    nameInput.TextColor3 = C_TEXT
+    nameInput.PlaceholderText = "new macro name"
+    nameInput.Text = ""
+    nameInput.Font = Enum.Font.Gotham
+    nameInput.TextSize = 12
+    nameInput.ClearTextOnFocus = false
+    nameInput.Parent = macroCard
+    Instance.new("UICorner", nameInput).CornerRadius = UDim.new(0, 6)
+
+    AddButtonRow(macroCard, "Create", Color3.fromRGB(60, 120, 65), function()
+        local newName = nameInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
+        if newName == "" then return end
+        Config.SelectedMacro = newName
+        MacroEngine.Steps = {}
+        MacroEngine.PlayIndex = 1
+        SaveMacroFile(newName, {})
+        SaveConfig()
+        macroSelector.Set(newName)
+        NotifyStepsChanged()
+    end)
+
+    AddButtonRow(macroCard, "Delete", Color3.fromRGB(135, 42, 42), function()
+        SafeDeleteFile(GetMacroFilename(Config.SelectedMacro))
+        local list = ListSavedMacros()
+        Config.SelectedMacro = list[1] or "Default"
+        MacroEngine.Steps = LoadMacroFile(Config.SelectedMacro)
+        MacroEngine.PlayIndex = 1
+        SaveConfig()
+        macroSelector.Set(Config.SelectedMacro)
+        NotifyStepsChanged()
+    end)
+
+    AddButtonRow(macroCard, "Refresh List", C_CTRL, function()
+        macroSelector.Set(Config.SelectedMacro)
+        MacroEngine.Steps = LoadMacroFile(Config.SelectedMacro)
+        NotifyStepsChanged()
+    end)
+
+    local recToggleObj, playToggleObj
+    recToggleObj = AddToggle(macroCard, "Record Macro", Config.RecordMacro, function(val)
         Config.RecordMacro = val
         if val then
             Config.PlayMacro = false
+            if playToggleObj then playToggleObj.Set(false) end
             InstallMacroHook()
             MacroEngine.Steps = {}
             MacroEngine.StartClock = os.clock()
+            NotifyStepsChanged()
         else
             SaveMacroFile(Config.SelectedMacro, MacroEngine.Steps)
+            NotifyStepsChanged()
         end
     end)
 
-    AddToggle(macroCtrlCard, "Play Macro", Config.PlayMacro, function(val)
+    playToggleObj = AddToggle(macroCard, "Play Macro", Config.PlayMacro, function(val)
         Config.PlayMacro = val
         if val then
             Config.RecordMacro = false
+            if recToggleObj then recToggleObj.Set(false) end
             MacroEngine.Steps = LoadMacroFile(Config.SelectedMacro)
             MacroEngine.PlayIndex = 1
             MacroEngine.PlayStartClock = os.clock()
+            NotifyStepsChanged()
         end
     end)
 
-    AddToggle(macroCtrlCard, "Equip Macro Units", Config.EquipMacroUnits, function(val)
+    AddToggle(macroCard, "Equip Macro Units", Config.EquipMacroUnits, function(val)
         Config.EquipMacroUnits = val
     end)
 
-    AddCycleDropdown(macroCtrlCard, "Play By", { "Money", "Time" }, Config.PlayBy, function(v)
-        Config.PlayBy = v
+    AddCycleSelector(macroCard, "Play By", { "Money", "Time" }, Config.PlayBy, function(val)
+        Config.PlayBy = val
     end)
 
-    local stepsCard = CreateSectionCard(macroPage, "Steps & Macro Maps")
-    local stepsInfo = Instance.new("TextLabel")
-    stepsInfo.Size = UDim2.new(1, 0, 0, 32)
-    stepsInfo.BackgroundTransparency = 1
-    stepsInfo.TextXAlignment = Enum.TextXAlignment.Left
-    stepsInfo.TextColor3 = C_MUTED
-    stepsInfo.Font = Enum.Font.Gotham
-    stepsInfo.TextSize = 11
-    stepsInfo.Text = "Macro: idle  |  Step 0 / 0"
-    stepsInfo.Parent = stepsCard
+    -- Steps Table Card (# | Action | Unit | W... | Yen)
+    local stepsCard = CreateCard(macroPage, "Steps (Picked Macro)")
+    local headerRow = Instance.new("TextLabel")
+    headerRow.Size = UDim2.new(1, 0, 0, 18)
+    headerRow.BackgroundTransparency = 1
+    headerRow.Text = "#     Action        Unit                     W     Yen"
+    headerRow.TextXAlignment = Enum.TextXAlignment.Left
+    headerRow.TextColor3 = C_MUTED
+    headerRow.Font = Enum.Font.Code
+    headerRow.TextSize = 11
+    headerRow.Parent = stepsCard
 
-    AddToggle(stepsCard, "Use Macro Maps", Config.UseMacroMaps, function(val)
+    local stepsListHolder = Instance.new("Frame")
+    stepsListHolder.Size = UDim2.new(1, 0, 0, 110)
+    stepsListHolder.BackgroundColor3 = C_CTRL
+    stepsListHolder.BorderSizePixel = 0
+    stepsListHolder.Parent = stepsCard
+    Instance.new("UICorner", stepsListHolder).CornerRadius = UDim.new(0, 6)
+
+    local stepsScroll = Instance.new("ScrollingFrame")
+    stepsScroll.Size = UDim2.new(1, -6, 1, -6)
+    stepsScroll.Position = UDim2.new(0, 3, 0, 3)
+    stepsScroll.BackgroundTransparency = 1
+    stepsScroll.ScrollBarThickness = 2
+    stepsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    stepsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    stepsScroll.Parent = stepsListHolder
+    local stepsLayout = Instance.new("UIListLayout", stepsScroll)
+    stepsLayout.Padding = UDim.new(0, 2)
+
+    local rowsCountLbl = Instance.new("TextLabel")
+    rowsCountLbl.Size = UDim2.new(1, 0, 0, 16)
+    rowsCountLbl.BackgroundTransparency = 1
+    rowsCountLbl.Text = "0 rows"
+    rowsCountLbl.TextXAlignment = Enum.TextXAlignment.Right
+    rowsCountLbl.TextColor3 = C_MUTED
+    rowsCountLbl.Font = Enum.Font.Gotham
+    rowsCountLbl.TextSize = 11
+    rowsCountLbl.Parent = stepsCard
+
+    local function RebuildStepsTable(steps)
+        for _, child in ipairs(stepsScroll:GetChildren()) do
+            if child:IsA("TextLabel") then child:Destroy() end
+        end
+        if not steps or #steps == 0 then
+            local emptyLbl = Instance.new("TextLabel")
+            emptyLbl.Size = UDim2.new(1, 0, 0, 22)
+            emptyLbl.BackgroundTransparency = 1
+            emptyLbl.Text = "  no steps"
+            emptyLbl.TextXAlignment = Enum.TextXAlignment.Left
+            emptyLbl.TextColor3 = C_MUTED
+            emptyLbl.Font = Enum.Font.Gotham
+            emptyLbl.TextSize = 11
+            emptyLbl.Parent = stepsScroll
+            rowsCountLbl.Text = "0 rows"
+            return
+        end
+
+        for i, st in ipairs(steps) do
+            local line = Instance.new("TextLabel")
+            line.Size = UDim2.new(1, 0, 0, 18)
+            line.BackgroundTransparency = 1
+            line.TextXAlignment = Enum.TextXAlignment.Left
+            line.TextColor3 = C_TEXT
+            line.Font = Enum.Font.Code
+            line.TextSize = 11
+            line.Text = string.format("%-4d  %-10s  %-22s  %-4d  %d",
+                i,
+                tostring(st.action or "Act"),
+                tostring(st.unit or "Unit"),
+                tonumber(st.wave) or 0,
+                tonumber(st.yen) or 0
+            )
+            line.Parent = stepsScroll
+        end
+        rowsCountLbl.Text = tostring(#steps) .. " rows"
+    end
+
+    MacroEngine.OnStepsChanged = RebuildStepsTable
+    MacroEngine.Steps = LoadMacroFile(Config.SelectedMacro)
+    RebuildStepsTable(MacroEngine.Steps)
+
+    -- Share / Import / Copy Card
+    local shareCard = CreateCard(macroPage, "Share")
+    local importBox = Instance.new("TextBox")
+    importBox.Size = UDim2.new(1, 0, 0, 28)
+    importBox.BackgroundColor3 = C_CTRL
+    importBox.TextColor3 = C_TEXT
+    importBox.PlaceholderText = "macro JSON"
+    importBox.Text = ""
+    importBox.Font = Enum.Font.Gotham
+    importBox.TextSize = 12
+    importBox.ClearTextOnFocus = false
+    importBox.Parent = shareCard
+    Instance.new("UICorner", importBox).CornerRadius = UDim.new(0, 6)
+
+    AddButtonRow(shareCard, "Import (saves under Name)", C_CTRL, function()
+        local target = nameInput.Text ~= "" and nameInput.Text or Config.SelectedMacro
+        ImportMacroJson(importBox.Text, target)
+        macroSelector.Set(Config.SelectedMacro)
+    end)
+
+    AddButtonRow(shareCard, "Copy Picked Macro", C_CTRL, function()
+        SafeSetClipboard(ExportMacroJson(Config.SelectedMacro, MacroEngine.Steps))
+    end)
+
+    -- Macro Maps Card (Story Maps selectors)
+    local mapsCard = CreateCard(macroPage, "Macro Maps")
+    AddToggle(mapsCard, "Use Macro Maps", Config.UseMacroMaps, function(val)
         Config.UseMacroMaps = val
     end)
+
+    for _, mapName in ipairs(STORY_MAPS) do
+        AddCycleSelector(mapsCard, mapName, function()
+            local list = { "None" }
+            for _, m in ipairs(ListSavedMacros()) do
+                table.insert(list, m)
+            end
+            return list
+        end, Config.MapMacros[mapName] or "None", function(chosen)
+            Config.MapMacros[mapName] = chosen
+        end)
+    end
 
     -- ========================================================================
     -- TAB 3: AUTO PLAY (All Modes, Event, Specific Unit Settings)
     -- ========================================================================
     local autoPlayPage = AddNavTab("Auto Play")
-    local apCard = CreateSectionCard(autoPlayPage, "Auto Play > All Modes & Event")
+    local apCard = CreateCard(autoPlayPage, "Auto Play > All Modes")
 
     AddToggle(apCard, "Auto Play", Config.AutoPlay, function(v) Config.AutoPlay = v end)
-    AddToggle(apCard, "Use Event Page In Summer Hunt", Config.UseEventInSummer, function(v) Config.UseEventInSummer = v end)
-    AddCycleDropdown(apCard, "Path Position", { "1%", "25%", "50%", "75%", "100%" }, tostring(Config.PathPosition) .. "%", function(v)
-        Config.PathPosition = tonumber(v:match("%d+")) or 50
-    end)
+    AddSlider(apCard, "Path Position", 1, 100, Config.PathPosition, "%", function(v) Config.PathPosition = v end)
+    AddSlider(apCard, "Spacing", 1, 20, Config.Spacing, " studs", function(v) Config.Spacing = v end)
     AddToggle(apCard, "Cover All Lanes", Config.CoverAllLanes, function(v) Config.CoverAllLanes = v end)
     AddToggle(apCard, "Place Near Others' Buffers", Config.PlaceNearBuffers, function(v) Config.PlaceNearBuffers = v end)
     AddToggle(apCard, "Weather-Aware", Config.WeatherAware, function(v) Config.WeatherAware = v end)
+    AddToggle(apCard, "Show Placement Grid", Config.ShowPlacementGrid, function(v) Config.ShowPlacementGrid = v end)
     AddToggle(apCard, "Farm Units First", Config.FarmUnitsFirst, function(v) Config.FarmUnitsFirst = v end)
     AddToggle(apCard, "Auto Upgrade", Config.AutoUpgrade, function(v) Config.AutoUpgrade = v end)
     AddToggle(apCard, "Upgrade While Saving", Config.UpgradeWhileSaving, function(v) Config.UpgradeWhileSaving = v end)
+    AddCycleSelector(apCard, "Griffin Form", { "Off", "Auto", "Always" }, Config.GriffinForm, function(v) Config.GriffinForm = v end)
     AddToggle(apCard, "Walk Like A Player", Config.WalkLikePlayer, function(v) Config.WalkLikePlayer = v end)
 
-    local unitCard = CreateSectionCard(autoPlayPage, "Specific Unit Settings (Slots 1-6)")
-    AddCycleDropdown(unitCard, "Active Slot", { "Slot 1", "Slot 2", "Slot 3", "Slot 4", "Slot 5", "Slot 6" }, "Slot " .. Config.SelectedUnitSlot, function(v)
-        Config.SelectedUnitSlot = tonumber(v:match("%d+")) or 1
+    local eventApCard = CreateCard(autoPlayPage, "Auto Play > Event (Summer Hunt)")
+    AddToggle(eventApCard, "Use This Page In Summer Hunt", Config.UseEventInSummer, function(v) Config.UseEventInSummer = v end)
+    AddSlider(eventApCard, "Event Path Position", 1, 100, Config.EventPathPosition, "%", function(v) Config.EventPathPosition = v end)
+
+    local unitCard = CreateCard(autoPlayPage, "Specific Unit Settings (Slots 1-6)")
+    local prioSlider, maxPlaceSlider, maxUpgSlider, placeWaveSlider, upgWaveSlider, hillToggle
+
+    local function RefreshSlotControls(slotIdx)
+        local cfgSlot = Config.UnitSlots[slotIdx]
+        if not cfgSlot then return end
+        if prioSlider then prioSlider.SetValue(cfgSlot.Priority) end
+        if maxPlaceSlider then maxPlaceSlider.SetValue(cfgSlot.MaxPlace) end
+        if maxUpgSlider then maxUpgSlider.SetValue(cfgSlot.MaxUpgrade) end
+        if placeWaveSlider then placeWaveSlider.SetValue(cfgSlot.PlaceWave) end
+        if upgWaveSlider then upgWaveSlider.SetValue(cfgSlot.UpgradeWave) end
+        if hillToggle then hillToggle.Set(cfgSlot.OnHill) end
+    end
+
+    AddCycleSelector(unitCard, "Unit Slot", { "1", "2", "3", "4", "5", "6" }, tostring(Config.SelectedUnitSlot), function(val)
+        local idx = tonumber(val) or 1
+        Config.SelectedUnitSlot = idx
+        RefreshSlotControls(idx)
     end)
-    AddToggle(unitCard, "Place Selected Slot On Hill", Config.UnitSlots[Config.SelectedUnitSlot].OnHill, function(v)
+
+    prioSlider = AddSlider(unitCard, "Place Priority", 1, 6, Config.UnitSlots[Config.SelectedUnitSlot].Priority, "", function(v)
+        Config.UnitSlots[Config.SelectedUnitSlot].Priority = v
+    end)
+    maxPlaceSlider = AddSlider(unitCard, "Max Place", 0, 20, Config.UnitSlots[Config.SelectedUnitSlot].MaxPlace, "", function(v)
+        Config.UnitSlots[Config.SelectedUnitSlot].MaxPlace = v
+    end)
+    maxUpgSlider = AddSlider(unitCard, "Max Upgrade", 0, 25, Config.UnitSlots[Config.SelectedUnitSlot].MaxUpgrade, "", function(v)
+        Config.UnitSlots[Config.SelectedUnitSlot].MaxUpgrade = v
+    end)
+    placeWaveSlider = AddSlider(unitCard, "Place From Wave", 1, 100, Config.UnitSlots[Config.SelectedUnitSlot].PlaceWave, "", function(v)
+        Config.UnitSlots[Config.SelectedUnitSlot].PlaceWave = v
+    end)
+    upgWaveSlider = AddSlider(unitCard, "Upgrade From Wave", 1, 100, Config.UnitSlots[Config.SelectedUnitSlot].UpgradeWave, "", function(v)
+        Config.UnitSlots[Config.SelectedUnitSlot].UpgradeWave = v
+    end)
+    hillToggle = AddToggle(unitCard, "Place On Hill", Config.UnitSlots[Config.SelectedUnitSlot].OnHill, function(v)
         Config.UnitSlots[Config.SelectedUnitSlot].OnHill = v
     end)
 
@@ -996,48 +1372,61 @@ local function BuildTabbedHub()
     -- TAB 4: JOIN (Castle / Events / Portals / Swordsmith & Misty Tower)
     -- ========================================================================
     local joinPage = AddNavTab("Join")
-    local eventCard = CreateSectionCard(joinPage, "Castle / Events (Summer Hunt)")
-    AddToggle(eventCard, "Auto Join Event Challenge", Config.AutoEventChallenge, function(v) Config.AutoEventChallenge = v end)
-    AddToggle(eventCard, "Event Matchmaking (OFF = Play Here)", Config.EventMatchmaking, function(v) Config.EventMatchmaking = v end)
-    AddToggle(eventCard, "Hunt Bingo Maps", Config.HuntBingoMaps, function(v) Config.HuntBingoMaps = v end)
-    AddToggle(eventCard, "Hunt Unwon Weathers", Config.HuntUnwonWeathers, function(v) Config.HuntUnwonWeathers = v end)
 
-    local castleCard = CreateSectionCard(joinPage, "Infinity Castle & Portals")
+    local castleCard = CreateCard(joinPage, "Infinity Castle")
     AddToggle(castleCard, "Auto Infinity Castle", Config.AutoInfinityCastle, function(v) Config.AutoInfinityCastle = v end)
-    AddToggle(castleCard, "Castle Matchmaking (OFF = Play Here)", Config.CastleMatchmaking, function(v) Config.CastleMatchmaking = v end)
-    AddToggle(castleCard, "Auto Portal", Config.AutoPortal, function(v) Config.AutoPortal = v end)
-    AddToggle(castleCard, "Portal Matchmaking (OFF = Play Here)", Config.PortalMatchmaking, function(v) Config.PortalMatchmaking = v end)
+    AddToggle(castleCard, "Matchmaking (OFF = Play Here)", Config.CastleMatchmaking, function(v) Config.CastleMatchmaking = v end)
+    AddCycleSelector(castleCard, "Floor", { "Next Floor", "Fixed Floor" }, Config.CastleFloorMode, function(v) Config.CastleFloorMode = v end)
+    AddSlider(castleCard, "Fixed Floor", 1, 100, Config.CastleFixedFloor, "", function(v) Config.CastleFixedFloor = v end)
+    AddCycleSelector(castleCard, "Difficulty", { "Normal", "Hard", "Nightmare" }, Config.CastleDifficulty, function(v) Config.CastleDifficulty = v end)
 
-    local villageCard = CreateSectionCard(joinPage, "Swordsmith / Misty Village & Tower")
-    AddToggle(villageCard, "Auto Swordsmith / Misty Village", Config.AutoSwordsmith, function(v) Config.AutoSwordsmith = v end)
-    AddToggle(villageCard, "Village Matchmaking (OFF = Play Here)", Config.SwordsmithMatchmaking, function(v) Config.SwordsmithMatchmaking = v end)
-    AddToggle(villageCard, "Blood Moon When Up", Config.BloodMoonWhenUp, function(v) Config.BloodMoonWhenUp = v end)
-    AddToggle(villageCard, "Auto Misty Tower", Config.AutoMistyTower, function(v) Config.AutoMistyTower = v end)
+    local eventJoinCard = CreateCard(joinPage, "Event Challenge")
+    AddToggle(eventJoinCard, "Auto Join Event Challenge", Config.AutoEventChallenge, function(v) Config.AutoEventChallenge = v end)
+    AddToggle(eventJoinCard, "Matchmaking (OFF = Play Here)", Config.EventMatchmaking, function(v) Config.EventMatchmaking = v end)
+    AddToggle(eventJoinCard, "Hunt Bingo Maps", Config.HuntBingoMaps, function(v) Config.HuntBingoMaps = v end)
+    AddToggle(eventJoinCard, "Hunt Unwon Weathers", Config.HuntUnwonWeathers, function(v) Config.HuntUnwonWeathers = v end)
+
+    local portalCard = CreateCard(joinPage, "Portals")
+    AddToggle(portalCard, "Auto Portal", Config.AutoPortal, function(v) Config.AutoPortal = v end)
+    AddToggle(portalCard, "Auto Start Portal", Config.AutoStartPortal, function(v) Config.AutoStartPortal = v end)
+    AddToggle(portalCard, "Auto Next Portal", Config.AutoNextPortal, function(v) Config.AutoNextPortal = v end)
+    AddToggle(portalCard, "Most Uses Left First", Config.MostUsesLeftFirst, function(v) Config.MostUsesLeftFirst = v end)
+    AddToggle(portalCard, "Matchmaking (OFF = Play Here)", Config.PortalMatchmaking, function(v) Config.PortalMatchmaking = v end)
+
+    local swordCard = CreateCard(joinPage, "Swordsmith Village & Misty Tower")
+    AddToggle(swordCard, "Auto Swordsmith Village", Config.AutoSwordsmith, function(v) Config.AutoSwordsmith = v end)
+    AddToggle(swordCard, "Matchmaking (OFF = Play Here)", Config.SwordsmithMatchmaking, function(v) Config.SwordsmithMatchmaking = v end)
+    AddCycleSelector(swordCard, "Stage", { "Best Available", "Day Stage", "Night Stage" }, Config.SwordsmithStage, function(v) Config.SwordsmithStage = v end)
+    AddToggle(swordCard, "Blood Moon When Up", Config.BloodMoonWhenUp, function(v) Config.BloodMoonWhenUp = v end)
+    AddSlider(swordCard, "Skip A Stage After Losses", 0, 10, Config.SkipStageAfterLosses, "", function(v) Config.SkipStageAfterLosses = v end)
+    AddToggle(swordCard, "Auto Misty Tower", Config.AutoMistyTower, function(v) Config.AutoMistyTower = v end)
+    AddToggle(swordCard, "Misty Matchmaking (OFF = Play Here)", Config.MistyMatchmaking, function(v) Config.MistyMatchmaking = v end)
+    AddSlider(swordCard, "Rest After Losses", 0, 10, Config.RestAfterLosses, "", function(v) Config.RestAfterLosses = v end)
 
     -- ========================================================================
-    -- TAB 5: GAME & LOBBY (Match Flow)
+    -- TAB 5: GAME
     -- ========================================================================
     local gamePage = AddNavTab("Game")
-    local gameCard = CreateSectionCard(gamePage, "Match Automation")
-    AddToggle(gameCard, "Auto Start Match", Config.AutoStartMatch, function(v) Config.AutoStartMatch = v end)
+    local gameCard = CreateCard(gamePage, "Match Flow")
+    AddToggle(gameCard, "Auto Start", Config.AutoStartMatch, function(v) Config.AutoStartMatch = v end)
     AddToggle(gameCard, "Auto Skip Waves", Config.AutoSkipWaves, function(v) Config.AutoSkipWaves = v end)
     AddToggle(gameCard, "Auto Replay", Config.AutoReplay, function(v) Config.AutoReplay = v end)
     AddToggle(gameCard, "Claim Clear Rewards", Config.ClaimClearRewards, function(v) Config.ClaimClearRewards = v end)
 
     SelectTab("Home")
 
-    -- Live Status & Heartbeat Updater
-    local frameCounter = 0
-    local fps = 60
+    -- Live Status & Heartbeat Loop
+    local frames = 0
+    local currentFps = 60
     RunService.RenderStepped:Connect(function()
-        frameCounter = frameCounter + 1
+        frames = frames + 1
     end)
 
     task.spawn(function()
         while sg.Parent do
             task.wait(1)
-            fps = frameCounter
-            frameCounter = 0
+            currentFps = frames
+            frames = 0
 
             local elapsed = math.floor(os.clock() - SessionStart)
             local mins = math.floor(elapsed / 60)
@@ -1047,24 +1436,21 @@ local function BuildTabbedHub()
                 pingMs = math.floor(StatsService.Network.ServerStatsItem["Data Ping"]:GetValue())
             end)
 
-            statusReadout.Text = string.format(
-                "Session: %dm %ds  |  Features On: %d\nFPS: %d  |  Ping: %d ms  |  Runs: %d  |  Macro Steps: %d",
-                mins, secs, CountActiveFeatures(), fps, pingMs, Config.Runs, #MacroEngine.Steps
+            local waveNow = GetCurrentWave()
+            Config.CurrentWave = waveNow
+
+            statusLbl.Text = string.format(
+                "Session: %dm %ds  |  Features On: %d\nFPS: %d  |  Ping: %d ms  |  Runs: %d  |  Wave: %d",
+                mins, secs, CountActiveFeatures(), currentFps, pingMs, Config.Runs, waveNow
             )
-            topPill.Text = string.format("AA Hub  •  %d fps  •  Tap to toggle", fps)
-            stepsInfo.Text = string.format(
-                "Macro: %s  |  Step %d / %d",
-                MacroEngine.Status,
-                math.min(MacroEngine.PlayIndex, math.max(1, #MacroEngine.Steps)),
-                #MacroEngine.Steps
-            )
+            topPill.Text = string.format("AA Unified  •  %d fps  •  Tap to toggle", currentFps)
         end
     end)
 
     return sg
 end
 
-local HubScreenGui = BuildTabbedHub()
+local HubGui = BuildTabbedHub()
 
 -- ============================================================================
 -- 7. MAIN RUNTIME LOOP
@@ -1072,7 +1458,7 @@ local HubScreenGui = BuildTabbedHub()
 task.spawn(function()
     while task.wait(0.35) do
         if IsInLobby() then
-            StepLobbyJoinAndMatchmaking(HubScreenGui)
+            StepLobbyJoinAndMatchmaking(HubGui)
         else
             if Config.AutoStartMatch then
                 CallRemoteFuzzy({ "vote_start", "start_game", "ready" })
