@@ -1,5 +1,5 @@
 -- ============================================================================
--- ANIME ADVENTURES - UNIFIED HUB (MATCHING HOME, MACRO & JOIN UI + AUTO JOIN)
+-- ANIME ADVENTURES - UNIFIED HUB (COMPLETE JOIN, PRIORITY, SWORDSMITH & GAME)
 -- Save as 'AA_Unified_Hub.lua' in your executor's 'workspace' and 'autoexec'.
 -- ============================================================================
 
@@ -99,6 +99,7 @@ if queueTP then
 end
 
 LocalPlayer.Idled:Connect(function()
+    if Config and Config.AntiAfkEnabled == false then return end
     pcall(function()
         VirtualUser:CaptureController()
         VirtualUser:ClickButton2(Vector2.new())
@@ -119,7 +120,8 @@ local STORY_MAPS = {
     "Spirit World",
     "Ant Kingdom",
     "Space Center",
-    "Haunted Mansion"
+    "Haunted Mansion",
+    "Rain Village"
 }
 
 local LEGEND_MAPS = {
@@ -132,8 +134,19 @@ local LEGEND_MAPS = {
     "Fiend City (Legend)"
 }
 
+local TEAM_OPTIONS = {
+    "Keep Current",
+    "Team 1",
+    "Team 2",
+    "Team 3",
+    "Team 4",
+    "Team 5",
+    "Team 6"
+}
+
 local Config = {
     Runs = 0,
+    Skips = 0,
     CurrentWave = 0,
     KeyStatus = "Free",
     SavedKey = "",
@@ -155,7 +168,8 @@ local Config = {
         ["Spirit World"] = "None",
         ["Ant Kingdom"] = "None",
         ["Space Center"] = "None",
-        ["Haunted Mansion"] = "None"
+        ["Haunted Mansion"] = "None",
+        ["Rain Village"] = "None"
     },
 
     -- Auto Play (All Modes & Event)
@@ -186,29 +200,35 @@ local Config = {
         [6] = { Priority = 6, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false }
     },
 
-    -- Join > Story / Challenges (Matches Image 18)
+    -- Join > Story / Challenges
     AutoJoinStory = false,
-    JoinMode = "Story",             -- "Story", "Legend", "Infinite"
+    JoinMode = "Story",
     JoinWorld = "Planet Greenie",
     JoinLegendWorld = "Dungeon Throne",
     JoinAct = "1",
     JoinDifficulty = "Normal",
-    StoryMatchmaking = false,       -- false = "Play Here", true = "Find Match"
+    StoryMatchmaking = false,
 
     AutoJoinChallenge = false,
     AutoJoinDailyChallenge = false,
-    ChallengeMatchmaking = false,   -- false = "Play Here", true = "Find Match"
+    ChallengeMatchmaking = false,
     ChallengeDropFilter = "--",
     ChallengeSkipModifiers = "--",
 
-    -- Join > Party / Dungeon / Teams
-    AutoJoinParty = false,
-    PartyCode = "",
-    AutoDungeon = false,
-    DungeonMatchmaking = true,
-    AutoEquipBestTeam = false,
+    -- Join > Party & User Stuffs
+    InvitePlayerTarget = "--",
+    AutoInviteToParty = false,
+    JoinPlayerTarget = "--",
+    HowToJoinPlayer = "Party",
+    AutoJoinPlayer = false,
+    UserStuffsPlayer = "--",
+    WhitelistUsernames = "",
+    WaitBeforeLeaving = 90,
+    LeaveWhenGone = false,
+    LeaveWhenOthersHere = false,
+    OnlyAutoJoinWithThem = false,
 
-    -- Join > Castle / Events / Portals / Swordsmith
+    -- Join > Castle / Events / Portals / Contracts / Raids
     AutoInfinityCastle = false,
     CastleMatchmaking = true,
     CastleFloorMode = "Next Floor",
@@ -220,28 +240,93 @@ local Config = {
     HuntBingoMaps = false,
     HuntUnwonWeathers = false,
 
+    AutoContracts = false,
+    AutoArtifactRaid = false,
+    AutoRaid = false,
+
     AutoPortal = false,
     AutoStartPortal = true,
     AutoNextPortal = true,
     MostUsesLeftFirst = true,
     PortalMatchmaking = true,
 
+    -- Join > Dungeon
+    AutoDungeon = false,
+    OpenChestsMode = "Every Chest Room",
+    StopAfterLosingRoom = 0,
+    TakeShrines = false,
+    BuyShopItems = false,
+    AvoidCurses = true,
+    CursesToAvoid = "Curse of Armor, Curse of Burst",
+    LookAhead = true,
+    RareChestPriority = 10,
+    TeamByRoomWeakness = false,
+    PhysicalWeakTeam = "Keep Current",
+    MagicWeakTeam = "Keep Current",
+    OtherWeakTeam = "Keep Current",
+    ShopPriorityItem = "Stat Cube",
+
+    -- Join > Teams
+    AutoEquipTeam = false,
+    TeamChallenge = "Keep Current",
+    TeamDailyChallenge = "Keep Current",
+    TeamContracts = "Keep Current",
+    TeamEventChallenge = "Keep Current",
+    TeamArtifactRaid = "Keep Current",
+    TeamSwordsmith = "Keep Current",
+    TeamPortals = "Keep Current",
+    TeamDungeon = "Keep Current",
+
+    -- Join > Swordsmith & Defenses
     AutoSwordsmith = false,
-    SwordsmithMatchmaking = true,
+    SwordsmithMatchmaking = false,
     SwordsmithStage = "Best Available",
     BloodMoonWhenUp = true,
-    SkipStageAfterLosses = 0,
+    SkipStageAfterLosses = 3,
     AutoMistyTower = false,
-    MistyMatchmaking = true,
+    MistyMatchmaking = false,
     RestAfterLosses = 3,
 
-    -- Priority / Game / Lobby / Webhook / Misc
-    TargetBossFirst = true,
-    TargetFastest = false,
-    AutoStartMatch = true,
-    AutoSkipWaves = true,
-    AutoReplay = true,
-    ClaimClearRewards = true,
+    AutoPlaceDefenses = true,
+    DefensesPlaceAt = "Damage Units",
+    DefensesPathPos = 50,
+    AutoBuyVillageShop = false,
+    BuyRarities = "Rare, Epic, Legendary, Mythic, Secret",
+    OnlyBuyByName = "--",
+    AutoEquipBestDefense = false,
+    AutoRepairDefenses = false,
+    RepairBelowPct = 50,
+    AutoScrapWhenFull = false,
+    ScrapUpToRarity = "Rare",
+
+    -- Priority Tab (Join Priority Weights 1 - 10)
+    PriorityChallenge = 7,
+    PriorityDailyChallenge = 6,
+    PriorityContracts = 5,
+    PriorityEventChallenge = 4,
+    PriorityArtifactRaid = 4,
+    PrioritySwordsmith = 4,
+    PriorityPortals = 3,
+    PriorityDungeon = 3,
+    PriorityRaid = 2,
+    PriorityInfinityCastle = 2,
+
+    -- Game Tab (Match, Abilities, Wave Rules)
+    AutoVoteStart = false,
+    AutoSkipWave = false,
+    AutoNext = false,
+    AutoRetry = false,
+    AutoLeave = false,
+    VoteToLoseXP = false,
+    BuffUptime = false,
+    BuffUnitsList = "Commander, Elfy, Gambler, Griffin",
+    AutoAbility = false,
+    SellFarmUnits = false,
+    SellAllUnitsInf = false,
+    LobbyOnInfiniteWave = false,
+    LeaveWhenPlayersBelow = false,
+
+    -- Lobby / Webhook / Misc
     AutoClaimQuests = false,
     WebhookUrl = "",
     SendMatchWebhook = false,
@@ -446,6 +531,21 @@ local function GetCurrentWave()
     return 0
 end
 
+local function GetOwnedUnits()
+    local list = {}
+    local folder = workspace:FindFirstChild("_units") or workspace:FindFirstChild("Units")
+    if not folder then return list end
+    for _, u in ipairs(folder:GetChildren()) do
+        local st = u:FindFirstChild("_stats") or u:FindFirstChild("Stats")
+        local pl = st and (st:FindFirstChild("player") or st:FindFirstChild("Owner"))
+        local attr = u:GetAttribute("Owner") or u:GetAttribute("Player")
+        if (pl and pl.Value == LocalPlayer) or (attr and tostring(attr) == LocalPlayer.Name) then
+            table.insert(list, u)
+        end
+    end
+    return list
+end
+
 -- ============================================================================
 -- 4. MACRO ENGINE
 -- ============================================================================
@@ -505,21 +605,6 @@ local function ImportMacroJson(rawJson, targetName)
     SaveConfig()
     NotifyStepsChanged()
     return true, #list
-end
-
-local function GetOwnedUnits()
-    local list = {}
-    local folder = workspace:FindFirstChild("_units") or workspace:FindFirstChild("Units")
-    if not folder then return list end
-    for _, u in ipairs(folder:GetChildren()) do
-        local st = u:FindFirstChild("_stats") or u:FindFirstChild("Stats")
-        local pl = st and (st:FindFirstChild("player") or st:FindFirstChild("Owner"))
-        local attr = u:GetAttribute("Owner") or u:GetAttribute("Player")
-        if (pl and pl.Value == LocalPlayer) or (attr and tostring(attr) == LocalPlayer.Name) then
-            table.insert(list, u)
-        end
-    end
-    return list
 end
 
 local function GetUnitSlotIndex(inst)
@@ -638,53 +723,208 @@ local function StepMacroRuntime()
 end
 
 -- ============================================================================
--- 5. AUTO JOIN ("Where do you want to Play?" -> "Play Here" / "Find Match")
+-- 5. PRIORITY FARM SCHEDULER, PARTY GUARD, TEAMS & SWORDSMITH DEFENSES
 -- ============================================================================
-local JoinGuard = { Busy = false, LastRun = 0, Cooldown = 2.5 }
+local JoinGuard = { Busy = false, LastRun = 0, Cooldown = 2.5, AloneSince = nil }
 
-local function StepLobbyJoinAndMatchmaking(rootGui)
-    if not IsInLobby() or JoinGuard.Busy then return end
+local function ParseWhitelistSet()
+    local set = {}
+    for token in tostring(Config.WhitelistUsernames or ""):gmatch("[^,%s]+") do
+        set[token:lower()] = true
+    end
+    return set
+end
 
-    local activeMode = nil
-    local useMatchmaking = true
-    local targetWorld = nil
-
-    if Config.AutoEventChallenge then
-        activeMode = "Summer Event"
-        useMatchmaking = Config.EventMatchmaking
-    elseif Config.AutoSwordsmith then
-        activeMode = "Misty Village"
-        useMatchmaking = Config.SwordsmithMatchmaking
-    elseif Config.AutoMistyTower then
-        activeMode = "Misty Village"
-        useMatchmaking = Config.MistyMatchmaking
-    elseif Config.AutoJoinChallenge or Config.AutoJoinDailyChallenge then
-        activeMode = "Regular Stages"
-        useMatchmaking = Config.ChallengeMatchmaking
-    elseif Config.AutoJoinStory then
-        activeMode = "Regular Stages"
-        useMatchmaking = Config.StoryMatchmaking
-        targetWorld = (Config.JoinMode == "Legend") and Config.JoinLegendWorld or Config.JoinWorld
-    elseif Config.AutoInfinityCastle then
-        activeMode = "Regular Stages"
-        useMatchmaking = Config.CastleMatchmaking
-    elseif Config.AutoPortal then
-        activeMode = "Regular Stages"
-        useMatchmaking = Config.PortalMatchmaking
-    elseif Config.AutoDungeon then
-        activeMode = "Regular Stages"
-        useMatchmaking = Config.DungeonMatchmaking
+local function CheckPartyAndUserStuffs()
+    if Config.AutoInviteToParty and Config.InvitePlayerTarget ~= "--" then
+        local targetPlr = Players:FindFirstChild(Config.InvitePlayerTarget)
+        if targetPlr then
+            CallRemoteFuzzy({ "party_invite", "invite_player", "invite" }, targetPlr)
+        end
     end
 
-    if not activeMode then return end
+    if Config.AutoJoinPlayer and Config.JoinPlayerTarget ~= "--" then
+        local targetPlr = Players:FindFirstChild(Config.JoinPlayerTarget)
+        if targetPlr then
+            CallRemoteFuzzy({ "join_party", "join_player", "teleport_to_player" }, targetPlr)
+        end
+    end
+
+    local wl = ParseWhitelistSet()
+    local hasWhitelisted = false
+    local hasStrangers = false
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            if wl[p.Name:lower()] then
+                hasWhitelisted = true
+            else
+                hasStrangers = true
+            end
+        end
+    end
+
+    if Config.LeaveWhenOthersHere and hasStrangers and not IsInLobby() then
+        CallRemoteFuzzy({ "leave_match", "return_lobby", "teleport_lobby" })
+        return false
+    end
+
+    if Config.LeaveWhenGone and next(wl) ~= nil then
+        if not hasWhitelisted then
+            JoinGuard.AloneSince = JoinGuard.AloneSince or os.clock()
+            if (os.clock() - JoinGuard.AloneSince) >= (Config.WaitBeforeLeaving or 90) then
+                JoinGuard.AloneSince = nil
+                CallRemoteFuzzy({ "leave_match", "return_lobby", "teleport_lobby" })
+                return false
+            end
+        else
+            JoinGuard.AloneSince = nil
+        end
+    end
+
+    if Config.OnlyAutoJoinWithThem and next(wl) ~= nil and not hasWhitelisted then
+        return false
+    end
+    return true
+end
+
+local function EquipTeamForMode(teamLabel)
+    if not Config.AutoEquipTeam or not teamLabel or teamLabel == "Keep Current" then return end
+    local slotNum = tonumber(teamLabel:match("%d+"))
+    if slotNum then
+        CallRemoteFuzzy({ "equip_team", "load_team", "select_team", "preset" }, slotNum)
+    end
+end
+
+local function ResolveHighestPriorityTask()
+    local candidates = {}
+
+    if Config.AutoJoinChallenge or Config.AutoJoinDailyChallenge then
+        local w = Config.AutoJoinChallenge and Config.PriorityChallenge or Config.PriorityDailyChallenge
+        table.insert(candidates, {
+            id = "Challenge",
+            weight = w,
+            lobbyMode = "Regular Stages",
+            matchmaking = Config.ChallengeMatchmaking,
+            team = Config.AutoJoinChallenge and Config.TeamChallenge or Config.TeamDailyChallenge
+        })
+    end
+    if Config.AutoContracts then
+        table.insert(candidates, {
+            id = "Contracts",
+            weight = Config.PriorityContracts,
+            lobbyMode = "Regular Stages",
+            matchmaking = true,
+            team = Config.TeamContracts
+        })
+    end
+    if Config.AutoEventChallenge then
+        table.insert(candidates, {
+            id = "EventChallenge",
+            weight = Config.PriorityEventChallenge,
+            lobbyMode = "Summer Event",
+            matchmaking = Config.EventMatchmaking,
+            team = Config.TeamEventChallenge
+        })
+    end
+    if Config.AutoArtifactRaid then
+        table.insert(candidates, {
+            id = "ArtifactRaid",
+            weight = Config.PriorityArtifactRaid,
+            lobbyMode = "Regular Stages",
+            matchmaking = true,
+            team = Config.TeamArtifactRaid
+        })
+    end
+    if Config.AutoSwordsmith or Config.AutoMistyTower then
+        table.insert(candidates, {
+            id = "Swordsmith",
+            weight = Config.PrioritySwordsmith,
+            lobbyMode = "Misty Village",
+            matchmaking = Config.AutoSwordsmith and Config.SwordsmithMatchmaking or Config.MistyMatchmaking,
+            team = Config.TeamSwordsmith
+        })
+    end
+    if Config.AutoPortal then
+        table.insert(candidates, {
+            id = "Portals",
+            weight = Config.PriorityPortals,
+            lobbyMode = "Regular Stages",
+            matchmaking = Config.PortalMatchmaking,
+            team = Config.TeamPortals
+        })
+    end
+    if Config.AutoDungeon then
+        table.insert(candidates, {
+            id = "Dungeon",
+            weight = Config.PriorityDungeon,
+            lobbyMode = "Regular Stages",
+            matchmaking = true,
+            team = Config.TeamDungeon
+        })
+    end
+    if Config.AutoRaid then
+        table.insert(candidates, {
+            id = "Raid",
+            weight = Config.PriorityRaid,
+            lobbyMode = "Regular Stages",
+            matchmaking = true,
+            team = "Keep Current"
+        })
+    end
+    if Config.AutoInfinityCastle then
+        table.insert(candidates, {
+            id = "InfinityCastle",
+            weight = Config.PriorityInfinityCastle,
+            lobbyMode = "Regular Stages",
+            matchmaking = Config.CastleMatchmaking,
+            team = "Keep Current"
+        })
+    end
+    if Config.AutoJoinStory then
+        local targetWorld = (Config.JoinMode == "Legend") and Config.JoinLegendWorld or Config.JoinWorld
+        table.insert(candidates, {
+            id = "Story",
+            weight = 1,
+            lobbyMode = "Regular Stages",
+            world = targetWorld,
+            matchmaking = Config.StoryMatchmaking,
+            team = "Keep Current"
+        })
+    end
+
+    table.sort(candidates, function(a, b) return a.weight > b.weight end)
+    return candidates[1]
+end
+
+local function StepLobbyAutomation(rootGui)
+    if not IsInLobby() or JoinGuard.Busy then return end
+    if not CheckPartyAndUserStuffs() then return end
+
+    if Config.AutoClaimQuests then
+        CallRemoteFuzzy({ "claim_quest", "claim_daily", "claim_all" })
+    end
+    if Config.AutoEquipBestDefense then
+        CallRemoteFuzzy({ "equip_best_defense", "auto_equip_defense" })
+    end
+    if Config.AutoRepairDefenses then
+        CallRemoteFuzzy({ "repair_defense", "repair_all" }, Config.RepairBelowPct)
+    end
+    if Config.AutoScrapWhenFull then
+        CallRemoteFuzzy({ "scrap_defense", "auto_scrap" }, Config.ScrapUpToRarity)
+    end
+
+    local taskObj = ResolveHighestPriorityTask()
+    if not taskObj then return end
     if (os.clock() - JoinGuard.LastRun) < JoinGuard.Cooldown then return end
 
     JoinGuard.Busy = true
     JoinGuard.LastRun = os.clock()
 
     pcall(function()
-        local desired = useMatchmaking and "find match" or "play here"
-        local fallback = useMatchmaking and "play here" or "find match"
+        EquipTeamForMode(taskObj.team)
+
+        local desired = taskObj.matchmaking and "find match" or "play here"
+        local fallback = taskObj.matchmaking and "play here" or "find match"
 
         local confirmBtn = FindButtonByPhrase(desired, rootGui) or FindButtonByPhrase(fallback, rootGui)
         if confirmBtn then
@@ -692,15 +932,15 @@ local function StepLobbyJoinAndMatchmaking(rootGui)
             return
         end
 
-        if targetWorld then
-            local worldBtn = FindButtonByPhrase(targetWorld, rootGui)
+        if taskObj.world then
+            local worldBtn = FindButtonByPhrase(taskObj.world, rootGui)
             if worldBtn then
                 SafeClick(worldBtn)
                 task.wait(0.25)
             end
         end
 
-        local modeBtn = FindButtonByPhrase(activeMode, rootGui)
+        local modeBtn = FindButtonByPhrase(taskObj.lobbyMode, rootGui)
         if modeBtn then
             SafeClick(modeBtn)
             task.wait(0.35)
@@ -718,8 +958,56 @@ local function StepLobbyJoinAndMatchmaking(rootGui)
     JoinGuard.Busy = false
 end
 
+local LastBuffClock = 0
+local function StepInMatchAutomation()
+    if not CheckPartyAndUserStuffs() then return end
+
+    if Config.AutoVoteStart then
+        CallRemoteFuzzy({ "vote_start", "start_game", "ready" })
+    end
+    if Config.AutoSkipWave then
+        CallRemoteFuzzy({ "vote_wave_skip", "skip_wave" })
+    end
+    if Config.AutoNext then
+        CallRemoteFuzzy({ "next_stage", "vote_next" })
+    end
+    if Config.AutoRetry then
+        CallRemoteFuzzy({ "replay", "vote_replay", "retry" })
+    end
+    if Config.AutoLeave then
+        CallRemoteFuzzy({ "leave_match", "return_lobby" })
+    end
+
+    -- Swordsmith Defenses & Village Shop
+    if Config.AutoPlaceDefenses then
+        CallRemoteFuzzy({ "place_defense", "spawn_defense", "auto_defense" }, Config.DefensesPlaceAt, Config.DefensesPathPos)
+    end
+    if Config.AutoBuyVillageShop then
+        CallRemoteFuzzy({ "buy_village_shop", "village_shop_buy" }, Config.BuyRarities, Config.OnlyBuyByName)
+    end
+
+    -- Abilities & Buff Uptime (Commander, Elfy, Gambler, Griffin)
+    if (Config.BuffUptime or Config.AutoAbility) and (os.clock() - LastBuffClock) >= 3.0 then
+        LastBuffClock = os.clock()
+        for _, u in ipairs(GetOwnedUnits()) do
+            CallRemoteFuzzy({ "use_active_attack", "activate_ability", "use_ability" }, u)
+        end
+    end
+
+    -- Wave Rules (Infinite Wave / Farm Sell)
+    local curWave = GetCurrentWave()
+    if Config.LobbyOnInfiniteWave and curWave >= 50 then
+        CallRemoteFuzzy({ "leave_match", "return_lobby" })
+    end
+    if Config.SellAllUnitsInf and curWave >= 50 then
+        for _, u in ipairs(GetOwnedUnits()) do
+            CallRemoteFuzzy({ "sell_unit", "sell" }, u)
+        end
+    end
+end
+
 -- ============================================================================
--- 6. BIGFROOT-INSPIRED BENTO UI (HOME, MACRO, JOIN > STORY / CHALLENGES, ETC.)
+-- 6. BIGFROOT-INSPIRED BENTO UI (ALL TABS & SUB-TABS)
 -- ============================================================================
 local SessionStart = os.clock()
 
@@ -753,13 +1041,12 @@ local function BuildBentoHub()
     local C_TEXT      = Color3.fromRGB(244, 240, 236)
     local C_SUBTEXT   = Color3.fromRGB(152, 142, 134)
 
-    local sg = Instance.new("ScreenGui")
+    local sg = Instance.new("ScreenGui", guiParent)
     sg.Name = "AA_BigFrootBento_Hub"
     sg.ResetOnSpawn = false
     sg.IgnoreGuiInset = true
     sg.DisplayOrder = 999999
     sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    sg.Parent = guiParent
 
     -- Top Floating Watermark Pill
     local topPill = Instance.new("TextButton", sg)
@@ -785,8 +1072,8 @@ local function BuildBentoHub()
     Instance.new("UICorner", pillDot).CornerRadius = UDim.new(1, 0)
 
     -- Main Window Shell
-    local winW = IsMobile and 650 or 800
-    local winH = IsMobile and 375 or 495
+    local winW = IsMobile and 650 or 810
+    local winH = IsMobile and 380 or 505
     local main = Instance.new("Frame", sg)
     main.Name = "MainWindow"
     main.Size = UDim2.new(0, winW, 0, winH)
@@ -808,7 +1095,7 @@ local function BuildBentoHub()
     -- LEFT SIDEBAR
     -- ========================================================================
     local sidebar = Instance.new("Frame", main)
-    sidebar.Size = UDim2.new(0, 174, 1, 0)
+    sidebar.Size = UDim2.new(0, 176, 1, 0)
     sidebar.BackgroundColor3 = C_SIDEBAR
     sidebar.BorderSizePixel = 0
     Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 14)
@@ -898,7 +1185,6 @@ local function BuildBentoHub()
         l2.TextSize = 11
     end
 
-    -- Bottom User Footer Card
     local userCard = Instance.new("Frame", sidebar)
     userCard.Size = UDim2.new(1, -16, 0, 40)
     userCard.Position = UDim2.new(0, 8, 1, -46)
@@ -945,8 +1231,8 @@ local function BuildBentoHub()
     -- TOP HEADER BAR & BENTO PAGE HOLDER
     -- ========================================================================
     local topBar = Instance.new("Frame", main)
-    topBar.Size = UDim2.new(1, -190, 0, 38)
-    topBar.Position = UDim2.new(0, 182, 0, 8)
+    topBar.Size = UDim2.new(1, -192, 0, 38)
+    topBar.Position = UDim2.new(0, 184, 0, 8)
     topBar.BackgroundTransparency = 1
 
     local breadcrumb = Instance.new("TextLabel", topBar)
@@ -978,8 +1264,8 @@ local function BuildBentoHub()
     Instance.new("UIPadding", searchBox).PaddingLeft = UDim.new(0, 10)
 
     local pageHolder = Instance.new("Frame", main)
-    pageHolder.Size = UDim2.new(1, -190, 1, -54)
-    pageHolder.Position = UDim2.new(0, 182, 0, 48)
+    pageHolder.Size = UDim2.new(1, -192, 1, -54)
+    pageHolder.Position = UDim2.new(0, 184, 0, 48)
     pageHolder.BackgroundTransparency = 1
 
     local Pages = {}
@@ -1284,7 +1570,7 @@ local function BuildBentoHub()
         }
     end
 
-    local function AddSlider(card, labelText, minVal, maxVal, currentVal, suffix, onChanged)
+    local function AddSlider(card, labelText, minVal, maxVal, currentVal, suffix, zeroWord, onChanged)
         local container = Instance.new("Frame", card)
         container.Size = UDim2.new(1, 0, 0, 36)
         container.BackgroundTransparency = 1
@@ -1307,7 +1593,6 @@ local function BuildBentoHub()
         valPill.Size = UDim2.new(0.28, 0, 1, 0)
         valPill.Position = UDim2.new(0.72, 0, 0, 0)
         valPill.BackgroundColor3 = C_INPUT
-        valPill.Text = tostring(currentVal) .. (suffix or "")
         valPill.TextColor3 = C_TEXT
         valPill.Font = Enum.Font.GothamSemibold
         valPill.TextSize = 11
@@ -1339,7 +1624,11 @@ local function BuildBentoHub()
             value = math.clamp(math.floor(v + 0.5), minVal, maxVal)
             local alpha = (maxVal > minVal) and ((value - minVal) / (maxVal - minVal)) or 0
             fill.Size = UDim2.new(alpha, 0, 1, 0)
-            valPill.Text = tostring(value) .. (suffix or "")
+            if zeroWord and value == 0 then
+                valPill.Text = zeroWord
+            else
+                valPill.Text = tostring(value) .. (suffix or "")
+            end
             onChanged(value)
             if saveIt then SaveConfig() end
         end
@@ -1375,8 +1664,52 @@ local function BuildBentoHub()
         return { SetValue = function(v) ApplyValue(v, false) end }
     end
 
+    local function AddTextBox(card, placeholderText, initialText, onChanged)
+        local tb = Instance.new("TextBox", card)
+        tb.Size = UDim2.new(1, 0, 0, 30)
+        tb.BackgroundColor3 = C_INPUT
+        tb.TextColor3 = C_TEXT
+        tb.PlaceholderText = placeholderText
+        tb.PlaceholderColor3 = C_SUBTEXT
+        tb.Text = initialText or ""
+        tb.TextXAlignment = Enum.TextXAlignment.Left
+        tb.Font = Enum.Font.Gotham
+        tb.TextSize = 11
+        tb.ClearTextOnFocus = false
+        Instance.new("UICorner", tb).CornerRadius = UDim.new(0, 7)
+        Instance.new("UIPadding", tb).PaddingLeft = UDim.new(0, 10)
+        tb.FocusLost:Connect(function()
+            onChanged(tb.Text)
+            SaveConfig()
+        end)
+        return tb
+    end
+
+    local function AddActionBtn(parentObj, txt, txtColor, cb)
+        local b = Instance.new("TextButton", parentObj)
+        b.Size = UDim2.new(1, 0, 0, 30)
+        b.BackgroundColor3 = C_INPUT
+        b.Text = txt
+        b.TextColor3 = txtColor or C_TEXT
+        b.Font = Enum.Font.GothamSemibold
+        b.TextSize = 11
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
+        b.MouseButton1Click:Connect(cb)
+        return b
+    end
+
+    local function GetServerPlayerNames()
+        local list = { "--" }
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                table.insert(list, p.Name)
+            end
+        end
+        return list
+    end
+
     -- ========================================================================
-    -- REGISTER PAGES & SIDEBAR TREE (Matches Screenshot 18)
+    -- REGISTER ALL PAGES & SIDEBAR TREE
     -- ========================================================================
     local pgHome          = CreateBentoPage("Home", "Home", nil)
     local pgMacroRec      = CreateBentoPage("MacroRecord", "Macro", "Record / Play")
@@ -1496,27 +1829,11 @@ local function BuildBentoHub()
     qLayout.CellSize = UDim2.new(0.5, -4, 0, 29)
     qLayout.CellPadding = UDim2.new(0, 6, 0, 6)
 
-    local function AddQuickBtn(parentObj, txt, cb)
-        local b = Instance.new("TextButton", parentObj)
-        b.BackgroundColor3 = C_INPUT
-        b.Text = txt
-        b.TextColor3 = C_TEXT
-        b.Font = Enum.Font.GothamSemibold
-        b.TextSize = 11
-        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
-        b.MouseButton1Click:Connect(cb)
-        return b
-    end
-
-    AddQuickBtn(qGrid, "Copy Discord", function() SafeSetClipboard("https://discord.gg/") end)
-    AddQuickBtn(qGrid, "Load last config", function() LoadConfig() end)
-    AddQuickBtn(qGrid, "Rejoin", function() RejoinCurrentServer() end)
-    AddQuickBtn(qGrid, "Server hop", function() HopToDifferentServer() end)
-
-    local wmBtn = AddQuickBtn(quickCard, "Toggle watermark", function()
-        topPill.Visible = not topPill.Visible
-    end)
-    wmBtn.Size = UDim2.new(1, 0, 0, 29)
+    AddActionBtn(qGrid, "Copy Discord", C_TEXT, function() SafeSetClipboard("https://discord.gg/") end)
+    AddActionBtn(qGrid, "Load last config", C_TEXT, function() LoadConfig() end)
+    AddActionBtn(qGrid, "Rejoin", C_TEXT, function() RejoinCurrentServer() end)
+    AddActionBtn(qGrid, "Server hop", C_TEXT, function() HopToDifferentServer() end)
+    AddActionBtn(quickCard, "Toggle watermark", C_TEXT, function() topPill.Visible = not topPill.Visible end)
 
     local statusCard = CreateBentoCard(pgHome.Right, "🕒", "Status")
     local statusGrid = Instance.new("Frame", statusCard)
@@ -1573,7 +1890,6 @@ local function BuildBentoHub()
     local keyRow = Instance.new("Frame", acctCard)
     keyRow.Size = UDim2.new(1, 0, 0, 18)
     keyRow.BackgroundTransparency = 1
-
     local keyLeft = Instance.new("TextLabel", keyRow)
     keyLeft.Size = UDim2.new(0.5, 0, 1, 0)
     keyLeft.BackgroundTransparency = 1
@@ -1582,7 +1898,6 @@ local function BuildBentoHub()
     keyLeft.TextColor3 = C_TEXT
     keyLeft.Font = Enum.Font.Gotham
     keyLeft.TextSize = 12
-
     local keyRight = Instance.new("TextLabel", keyRow)
     keyRight.Size = UDim2.new(0.5, 0, 1, 0)
     keyRight.Position = UDim2.new(0.5, 0, 0, 0)
@@ -1593,21 +1908,13 @@ local function BuildBentoHub()
     keyRight.Font = Enum.Font.GothamSemibold
     keyRight.TextSize = 12
 
-    local keyBox = Instance.new("TextBox", acctCard)
-    keyBox.Size = UDim2.new(1, 0, 0, 26)
-    keyBox.BackgroundColor3 = C_INPUT
-    keyBox.TextColor3 = C_TEXT
-    keyBox.PlaceholderText = "enter license key..."
-    keyBox.PlaceholderColor3 = C_SUBTEXT
-    keyBox.Text = Config.SavedKey
-    keyBox.Font = Enum.Font.Gotham
-    keyBox.TextSize = 11
+    local keyBox = AddTextBox(acctCard, "enter license key...", Config.SavedKey, function(txt)
+        Config.SavedKey = txt
+    end)
     keyBox.Visible = false
-    keyBox.ClearTextOnFocus = false
-    Instance.new("UICorner", keyBox).CornerRadius = UDim.new(0, 6)
-    Instance.new("UIPadding", keyBox).PaddingLeft = UDim.new(0, 8)
 
-    local repKeyBtn = AddQuickBtn(acctCard, "Replace key", function()
+    local repKeyBtn
+    repKeyBtn = AddActionBtn(acctCard, "Replace key", C_TEXT, function()
         if not keyBox.Visible then
             keyBox.Visible = true
             repKeyBtn.Text = "Save key"
@@ -1621,19 +1928,16 @@ local function BuildBentoHub()
             SaveConfig()
         end
     end)
-    repKeyBtn.Size = UDim2.new(1, 0, 0, 30)
 
     -- ========================================================================
-    -- PAGE 2: MACRO > RECORD / PLAY
+    -- PAGE 2 & 3: MACRO (RECORD / PLAY & MACRO MAPS)
     -- ========================================================================
     local macroLeft = CreateBentoCard(pgMacroRec.Left, "⇄", "Macro")
     AddSubLabel(macroLeft, "Files")
     AddFieldLabel(macroLeft, "Macro")
-
     local macroDropdown = AddDropdownBox(macroLeft, function()
         local list = ListSavedMacros()
-        if #list == 0 then return { "--" } end
-        return list
+        return #list == 0 and { "--" } or list
     end, Config.SelectedMacro, function(chosen)
         Config.SelectedMacro = chosen
         MacroEngine.Steps = LoadMacroFile(chosen)
@@ -1642,53 +1946,12 @@ local function BuildBentoHub()
     end)
 
     AddFieldLabel(macroLeft, "Name")
-    local macroNameBox = Instance.new("TextBox", macroLeft)
-    macroNameBox.Size = UDim2.new(1, 0, 0, 30)
-    macroNameBox.BackgroundColor3 = C_INPUT
-    macroNameBox.TextColor3 = C_TEXT
-    macroNameBox.PlaceholderText = "new macro name"
-    macroNameBox.PlaceholderColor3 = C_SUBTEXT
-    macroNameBox.Text = ""
-    macroNameBox.TextXAlignment = Enum.TextXAlignment.Left
-    macroNameBox.Font = Enum.Font.Gotham
-    macroNameBox.TextSize = 12
-    macroNameBox.ClearTextOnFocus = false
-    Instance.new("UICorner", macroNameBox).CornerRadius = UDim.new(0, 7)
-    Instance.new("UIPadding", macroNameBox).PaddingLeft = UDim.new(0, 10)
+    local macroNameBox = AddTextBox(macroLeft, "new macro name", "", function() end)
 
     local cdRow = Instance.new("Frame", macroLeft)
     cdRow.Size = UDim2.new(1, 0, 0, 30)
     cdRow.BackgroundTransparency = 1
-
-    local createBtn = Instance.new("TextButton", cdRow)
-    createBtn.Size = UDim2.new(0.5, -3, 1, 0)
-    createBtn.BackgroundColor3 = C_INPUT
-    createBtn.Text = "Create"
-    createBtn.TextColor3 = C_TEXT
-    createBtn.Font = Enum.Font.GothamSemibold
-    createBtn.TextSize = 12
-    Instance.new("UICorner", createBtn).CornerRadius = UDim.new(0, 7)
-
-    local deleteBtn = Instance.new("TextButton", cdRow)
-    deleteBtn.Size = UDim2.new(0.5, -3, 1, 0)
-    deleteBtn.Position = UDim2.new(0.5, 3, 0, 0)
-    deleteBtn.BackgroundColor3 = C_INPUT
-    deleteBtn.Text = "Delete"
-    deleteBtn.TextColor3 = C_RED_TXT
-    deleteBtn.Font = Enum.Font.GothamSemibold
-    deleteBtn.TextSize = 12
-    Instance.new("UICorner", deleteBtn).CornerRadius = UDim.new(0, 7)
-
-    local refreshBtn = Instance.new("TextButton", macroLeft)
-    refreshBtn.Size = UDim2.new(1, 0, 0, 30)
-    refreshBtn.BackgroundColor3 = C_INPUT
-    refreshBtn.Text = "Refresh List"
-    refreshBtn.TextColor3 = C_TEXT
-    refreshBtn.Font = Enum.Font.GothamSemibold
-    refreshBtn.TextSize = 12
-    Instance.new("UICorner", refreshBtn).CornerRadius = UDim.new(0, 7)
-
-    createBtn.MouseButton1Click:Connect(function()
+    local createBtn = AddActionBtn(cdRow, "Create", C_TEXT, function()
         local nm = macroNameBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
         if nm == "" then return end
         Config.SelectedMacro = nm
@@ -1699,8 +1962,9 @@ local function BuildBentoHub()
         macroDropdown.Set(nm)
         NotifyStepsChanged()
     end)
+    createBtn.Size = UDim2.new(0.5, -3, 1, 0)
 
-    deleteBtn.MouseButton1Click:Connect(function()
+    local deleteBtn = AddActionBtn(cdRow, "Delete", C_RED_TXT, function()
         SafeDeleteFile(GetMacroFilename(Config.SelectedMacro))
         local list = ListSavedMacros()
         Config.SelectedMacro = list[1] or "--"
@@ -1710,12 +1974,12 @@ local function BuildBentoHub()
         macroDropdown.Set(Config.SelectedMacro)
         NotifyStepsChanged()
     end)
+    deleteBtn.Size = UDim2.new(0.5, -3, 1, 0)
+    deleteBtn.Position = UDim2.new(0.5, 3, 0, 0)
 
-    refreshBtn.MouseButton1Click:Connect(function()
+    AddActionBtn(macroLeft, "Refresh List", C_TEXT, function()
         local list = ListSavedMacros()
-        if Config.SelectedMacro == "--" and list[1] then
-            Config.SelectedMacro = list[1]
-        end
+        if Config.SelectedMacro == "--" and list[1] then Config.SelectedMacro = list[1] end
         macroDropdown.Set(Config.SelectedMacro)
         MacroEngine.Steps = LoadMacroFile(Config.SelectedMacro)
         NotifyStepsChanged()
@@ -1737,7 +2001,6 @@ local function BuildBentoHub()
             NotifyStepsChanged()
         end
     end)
-
     playTgl = AddToggle(macroLeft, "Play Macro", Config.PlayMacro, function(val)
         Config.PlayMacro = val
         if val then
@@ -1749,15 +2012,9 @@ local function BuildBentoHub()
             NotifyStepsChanged()
         end
     end)
-
-    AddToggle(macroLeft, "Equip Macro Units", Config.EquipMacroUnits, function(val)
-        Config.EquipMacroUnits = val
-    end)
-
+    AddToggle(macroLeft, "Equip Macro Units", Config.EquipMacroUnits, function(val) Config.EquipMacroUnits = val end)
     AddFieldLabel(macroLeft, "Play By")
-    AddDropdownBox(macroLeft, { "Money", "Time" }, Config.PlayBy, function(val)
-        Config.PlayBy = val
-    end)
+    AddDropdownBox(macroLeft, { "Money", "Time" }, Config.PlayBy, function(val) Config.PlayBy = val end)
 
     local statusRow = Instance.new("Frame", macroLeft)
     statusRow.Size = UDim2.new(1, 0, 0, 22)
@@ -1833,8 +2090,7 @@ local function BuildBentoHub()
     stepsScroll.ScrollBarThickness = 2
     stepsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
     stepsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    local stepsList = Instance.new("UIListLayout", stepsScroll)
-    stepsList.Padding = UDim.new(0, 3)
+    Instance.new("UIListLayout", stepsScroll).Padding = UDim.new(0, 3)
 
     local rowsFooter = Instance.new("TextLabel", stepsCard)
     rowsFooter.Size = UDim2.new(1, 0, 0, 14)
@@ -1863,7 +2119,6 @@ local function BuildBentoHub()
             progFill.Size = UDim2.new(0, 0, 1, 0)
             return
         end
-
         for i, st in ipairs(steps) do
             local r = Instance.new("TextLabel", stepsScroll)
             r.Size = UDim2.new(1, 0, 0, 18)
@@ -1872,69 +2127,29 @@ local function BuildBentoHub()
             r.TextColor3 = C_TEXT
             r.Font = Enum.Font.Code
             r.TextSize = 10
-            r.Text = string.format("  %-3d  %-9s  %-16s  %-5d  %d",
-                i,
-                tostring(st.action or "Place"),
-                tostring(st.unit or "Unit"):sub(1, 16),
-                tonumber(st.wave) or 1,
-                tonumber(st.yen) or 0
-            )
+            r.Text = string.format("  %-3d  %-9s  %-16s  %-5d  %d", i, tostring(st.action or "Place"), tostring(st.unit or "Unit"):sub(1, 16), tonumber(st.wave) or 1, tonumber(st.yen) or 0)
         end
         rowsFooter.Text = tostring(#steps) .. " rows"
         local curIdx = math.clamp(MacroEngine.PlayIndex - 1, 0, #steps)
         sRight.Text = string.format("%d / %d", curIdx, #steps)
         progFill.Size = UDim2.new(#steps > 0 and (curIdx / #steps) or 0, 0, 1, 0)
     end
-
     MacroEngine.OnStepsChanged = RefreshStepsUI
     MacroEngine.Steps = LoadMacroFile(Config.SelectedMacro)
     RefreshStepsUI(MacroEngine.Steps)
 
     local shareCard = CreateBentoCard(pgMacroRec.Right, "📤", "Share")
     AddFieldLabel(shareCard, "Import")
-    local importInput = Instance.new("TextBox", shareCard)
-    importInput.Size = UDim2.new(1, 0, 0, 30)
-    importInput.BackgroundColor3 = C_INPUT
-    importInput.TextColor3 = C_TEXT
-    importInput.PlaceholderText = "macro JSON"
-    importInput.PlaceholderColor3 = C_SUBTEXT
-    importInput.Text = ""
-    importInput.TextXAlignment = Enum.TextXAlignment.Left
-    importInput.Font = Enum.Font.Gotham
-    importInput.TextSize = 11
-    importInput.ClearTextOnFocus = false
-    Instance.new("UICorner", importInput).CornerRadius = UDim.new(0, 7)
-    Instance.new("UIPadding", importInput).PaddingLeft = UDim.new(0, 10)
-
-    local impBtn = Instance.new("TextButton", shareCard)
-    impBtn.Size = UDim2.new(1, 0, 0, 30)
-    impBtn.BackgroundColor3 = C_INPUT
-    impBtn.Text = "Import (saves under Name)"
-    impBtn.TextColor3 = C_TEXT
-    impBtn.Font = Enum.Font.GothamSemibold
-    impBtn.TextSize = 11
-    Instance.new("UICorner", impBtn).CornerRadius = UDim.new(0, 7)
-    impBtn.MouseButton1Click:Connect(function()
+    local importInput = AddTextBox(shareCard, "macro JSON", "", function() end)
+    AddActionBtn(shareCard, "Import (saves under Name)", C_TEXT, function()
         local nm = macroNameBox.Text ~= "" and macroNameBox.Text or Config.SelectedMacro
         ImportMacroJson(importInput.Text, nm)
         macroDropdown.Set(Config.SelectedMacro)
     end)
-
-    local copyBtn = Instance.new("TextButton", shareCard)
-    copyBtn.Size = UDim2.new(1, 0, 0, 30)
-    copyBtn.BackgroundColor3 = C_INPUT
-    copyBtn.Text = "Copy Picked Macro"
-    copyBtn.TextColor3 = C_TEXT
-    copyBtn.Font = Enum.Font.GothamSemibold
-    copyBtn.TextSize = 11
-    Instance.new("UICorner", copyBtn).CornerRadius = UDim.new(0, 7)
-    copyBtn.MouseButton1Click:Connect(function()
+    AddActionBtn(shareCard, "Copy Picked Macro", C_TEXT, function()
         SafeSetClipboard(ExportMacroJson(Config.SelectedMacro, MacroEngine.Steps))
     end)
 
-    -- ========================================================================
-    -- PAGE 3: MACRO > MACRO MAPS
-    -- ========================================================================
     local storyMapsCard = CreateBentoCard(pgMacroMaps.Left, "🗺", "Story Maps")
     AddToggle(storyMapsCard, "Use Macro Maps", Config.UseMacroMaps, function(v) Config.UseMacroMaps = v end)
     for _, mName in ipairs(STORY_MAPS) do
@@ -1943,21 +2158,16 @@ local function BuildBentoHub()
             local opts = { "None" }
             for _, saved in ipairs(ListSavedMacros()) do table.insert(opts, saved) end
             return opts
-        end, Config.MapMacros[mName] or "None", function(v)
-            Config.MapMacros[mName] = v
-        end)
+        end, Config.MapMacros[mName] or "None", function(v) Config.MapMacros[mName] = v end)
     end
-
-    local otherMapsCard = CreateBentoCard(pgMacroMaps.Right, "📍", "Other Maps")
-    AddSubLabel(otherMapsCard, "Assign saved macros to Summer Event, Misty Village, or Infinity Castle.")
 
     -- ========================================================================
     -- PAGE 4 & 5: AUTO PLAY
     -- ========================================================================
     local apAllCard = CreateBentoCard(pgAutoAll.Left, "🤖", "Auto Play")
     AddToggle(apAllCard, "Auto Play", Config.AutoPlay, function(v) Config.AutoPlay = v end)
-    AddSlider(apAllCard, "Path Position", 1, 100, Config.PathPosition, "%", function(v) Config.PathPosition = v end)
-    AddSlider(apAllCard, "Spacing", 1, 20, Config.Spacing, " studs", function(v) Config.Spacing = v end)
+    AddSlider(apAllCard, "Path Position", 1, 100, Config.PathPosition, "%", nil, function(v) Config.PathPosition = v end)
+    AddSlider(apAllCard, "Spacing", 1, 20, Config.Spacing, " studs", nil, function(v) Config.Spacing = v end)
     AddToggle(apAllCard, "Cover All Lanes", Config.CoverAllLanes, function(v) Config.CoverAllLanes = v end)
     AddToggle(apAllCard, "Place Near Others' Buffers", Config.PlaceNearBuffers, function(v) Config.PlaceNearBuffers = v end)
     AddToggle(apAllCard, "Weather-Aware", Config.WeatherAware, function(v) Config.WeatherAware = v end)
@@ -1973,7 +2183,7 @@ local function BuildBentoHub()
 
     local evApCard = CreateBentoCard(pgAutoEvent.Left, "✦", "Event Auto Play")
     AddToggle(evApCard, "Use This Page In Summer Hunt", Config.UseEventInSummer, function(v) Config.UseEventInSummer = v end)
-    AddSlider(evApCard, "Path Position", 1, 100, Config.EventPathPosition, "%", function(v) Config.EventPathPosition = v end)
+    AddSlider(evApCard, "Path Position", 1, 100, Config.EventPathPosition, "%", nil, function(v) Config.EventPathPosition = v end)
 
     local unitSpecCard = CreateBentoCard(pgAutoEvent.Right, "👤", "Specific Unit Settings")
     local sPrio, sMaxP, sMaxU, sPlaceW, sUpgW, tHill
@@ -1991,70 +2201,38 @@ local function BuildBentoHub()
             tHill.Set(sl.OnHill)
         end
     end)
-    sPrio   = AddSlider(unitSpecCard, "Place Priority", 1, 6, Config.UnitSlots[Config.SelectedUnitSlot].Priority, "", function(v) Config.UnitSlots[Config.SelectedUnitSlot].Priority = v end)
-    sMaxP   = AddSlider(unitSpecCard, "Max Place", 0, 20, Config.UnitSlots[Config.SelectedUnitSlot].MaxPlace, "", function(v) Config.UnitSlots[Config.SelectedUnitSlot].MaxPlace = v end)
-    sMaxU   = AddSlider(unitSpecCard, "Max Upgrade", 0, 25, Config.UnitSlots[Config.SelectedUnitSlot].MaxUpgrade, "", function(v) Config.UnitSlots[Config.SelectedUnitSlot].MaxUpgrade = v end)
-    sPlaceW = AddSlider(unitSpecCard, "Place From Wave", 1, 100, Config.UnitSlots[Config.SelectedUnitSlot].PlaceWave, "", function(v) Config.UnitSlots[Config.SelectedUnitSlot].PlaceWave = v end)
-    sUpgW   = AddSlider(unitSpecCard, "Upgrade From Wave", 1, 100, Config.UnitSlots[Config.SelectedUnitSlot].UpgradeWave, "", function(v) Config.UnitSlots[Config.SelectedUnitSlot].UpgradeWave = v end)
+    sPrio   = AddSlider(unitSpecCard, "Place Priority", 1, 6, Config.UnitSlots[Config.SelectedUnitSlot].Priority, "", nil, function(v) Config.UnitSlots[Config.SelectedUnitSlot].Priority = v end)
+    sMaxP   = AddSlider(unitSpecCard, "Max Place", 0, 20, Config.UnitSlots[Config.SelectedUnitSlot].MaxPlace, "", nil, function(v) Config.UnitSlots[Config.SelectedUnitSlot].MaxPlace = v end)
+    sMaxU   = AddSlider(unitSpecCard, "Max Upgrade", 0, 25, Config.UnitSlots[Config.SelectedUnitSlot].MaxUpgrade, "", nil, function(v) Config.UnitSlots[Config.SelectedUnitSlot].MaxUpgrade = v end)
+    sPlaceW = AddSlider(unitSpecCard, "Place From Wave", 1, 100, Config.UnitSlots[Config.SelectedUnitSlot].PlaceWave, "", nil, function(v) Config.UnitSlots[Config.SelectedUnitSlot].PlaceWave = v end)
+    sUpgW   = AddSlider(unitSpecCard, "Upgrade From Wave", 1, 100, Config.UnitSlots[Config.SelectedUnitSlot].UpgradeWave, "", nil, function(v) Config.UnitSlots[Config.SelectedUnitSlot].UpgradeWave = v end)
     tHill   = AddToggle(unitSpecCard, "Place On Hill", Config.UnitSlots[Config.SelectedUnitSlot].OnHill, function(v) Config.UnitSlots[Config.SelectedUnitSlot].OnHill = v end)
 
     -- ========================================================================
-    -- PAGE 6: JOIN > STORY / CHALLENGES (Matches Screenshot 18 Exactly)
-    -- Left Card: Auto Join (Mode, World, Legend World, Act / Stage, Difficulty, Matchmaking)
-    -- Right Card: Challenges (Auto Join Challenge, Daily Challenge, Matchmaking, Filters, Live Info)
+    -- PAGE 6: JOIN > STORY / CHALLENGES (Matches Screenshot 19 & 21)
     -- ========================================================================
     local ajCard = CreateBentoCard(pgJoinStory.Left, "🚀", "Auto Join")
     AddToggle(ajCard, "Auto Join", Config.AutoJoinStory, function(v) Config.AutoJoinStory = v end)
-
     AddFieldLabel(ajCard, "Mode")
-    AddDropdownBox(ajCard, { "Story", "Legend", "Infinite" }, Config.JoinMode, function(v)
-        Config.JoinMode = v
-    end)
-
+    AddDropdownBox(ajCard, { "Story", "Legend", "Infinite" }, Config.JoinMode, function(v) Config.JoinMode = v end)
     AddFieldLabel(ajCard, "World")
-    AddDropdownBox(ajCard, STORY_MAPS, Config.JoinWorld, function(v)
-        Config.JoinWorld = v
-    end)
-
+    AddDropdownBox(ajCard, STORY_MAPS, Config.JoinWorld, function(v) Config.JoinWorld = v end)
     AddFieldLabel(ajCard, "Legend World")
-    AddDropdownBox(ajCard, LEGEND_MAPS, Config.JoinLegendWorld, function(v)
-        Config.JoinLegendWorld = v
-    end)
-
+    AddDropdownBox(ajCard, LEGEND_MAPS, Config.JoinLegendWorld, function(v) Config.JoinLegendWorld = v end)
     AddFieldLabel(ajCard, "Act / Stage")
-    AddDropdownBox(ajCard, { "1", "2", "3", "4", "5", "6" }, Config.JoinAct, function(v)
-        Config.JoinAct = v
-    end)
-
+    AddDropdownBox(ajCard, { "1", "2", "3", "4", "5", "6" }, Config.JoinAct, function(v) Config.JoinAct = v end)
     AddFieldLabel(ajCard, "Difficulty")
-    AddDropdownBox(ajCard, { "Normal", "Hard", "Nightmare" }, Config.JoinDifficulty, function(v)
-        Config.JoinDifficulty = v
-    end)
-
-    AddToggle(ajCard, "Matchmaking", Config.StoryMatchmaking, function(v)
-        Config.StoryMatchmaking = v
-    end)
+    AddDropdownBox(ajCard, { "Normal", "Hard", "Nightmare" }, Config.JoinDifficulty, function(v) Config.JoinDifficulty = v end)
+    AddToggle(ajCard, "Matchmaking", Config.StoryMatchmaking, function(v) Config.StoryMatchmaking = v end)
 
     local chCard = CreateBentoCard(pgJoinStory.Right, "⚔", "Challenges")
-    AddToggle(chCard, "Auto Join Challenge", Config.AutoJoinChallenge, function(v)
-        Config.AutoJoinChallenge = v
-    end)
-    AddToggle(chCard, "Auto Join Daily Challenge", Config.AutoJoinDailyChallenge, function(v)
-        Config.AutoJoinDailyChallenge = v
-    end)
-    AddToggle(chCard, "Matchmaking", Config.ChallengeMatchmaking, function(v)
-        Config.ChallengeMatchmaking = v
-    end)
-
+    AddToggle(chCard, "Auto Join Challenge", Config.AutoJoinChallenge, function(v) Config.AutoJoinChallenge = v end)
+    AddToggle(chCard, "Auto Join Daily Challenge", Config.AutoJoinDailyChallenge, function(v) Config.AutoJoinDailyChallenge = v end)
+    AddToggle(chCard, "Matchmaking", Config.ChallengeMatchmaking, function(v) Config.ChallengeMatchmaking = v end)
     AddFieldLabel(chCard, "Only If It Drops (blank = any)")
-    AddDropdownBox(chCard, { "--", "Star Fruit", "Star Fruit (Red)", "Star Fruit (Green)", "Star Remnant (Limited)", "Divine Wish", "Stat Cube", "Gems" }, Config.ChallengeDropFilter, function(v)
-        Config.ChallengeDropFilter = v
-    end)
-
+    AddDropdownBox(chCard, { "--", "Star Fruit", "Star Fruit (Red)", "Star Fruit (Green)", "Star Remnant (Limited)", "Divine Wish", "Stat Cube", "Gems" }, Config.ChallengeDropFilter, function(v) Config.ChallengeDropFilter = v end)
     AddFieldLabel(chCard, "Skip Modifiers")
-    AddDropdownBox(chCard, { "--", "Shield Enemies", "Regen Enemies", "Fast Enemies", "Explosive Enemies", "High Cost" }, Config.ChallengeSkipModifiers, function(v)
-        Config.ChallengeSkipModifiers = v
-    end)
+    AddDropdownBox(chCard, { "--", "Fast Enemies", "Shield Enemies", "Regen Enemies", "Explosive Enemies", "High Cost" }, Config.ChallengeSkipModifiers, function(v) Config.ChallengeSkipModifiers = v end)
 
     local chFeed = Instance.new("TextLabel", chCard)
     chFeed.Size = UDim2.new(1, 0, 0, 96)
@@ -2065,36 +2243,45 @@ local function BuildBentoHub()
     chFeed.TextColor3 = C_SUBTEXT
     chFeed.Font = Enum.Font.Gotham
     chFeed.TextSize = 11
-    chFeed.Text = "Challenge: Space Center Act 3 · Shield Enemies · not cleared  (00:52 left)\n  Star Fruit (Red), Star Fruit (Green), Star Fruit, Gems\nDaily: Haunted Mansion · Regen Enemies · not cleared  (5:00:52 left)\n  Divine Wish, Star Remnant (Limited), Stat Cube, Perfect Stat Cube, Gems"
+    chFeed.Text = "Challenge: Rain Village Act 2 · Fast Enemies · not cleared  (17:07 left)\n  Star Fruit, Star Fruit (Red), Gems\nDaily: Haunted Mansion · Regen Enemies · not cleared  (4:47:07 left)\n  Divine Wish, Star Remnant (Limited), Stat Cube, Perfect Stat Cube, Gems"
 
     -- ========================================================================
-    -- PAGES 7-11: PARTY, CASTLE / EVENTS, DUNGEON, TEAMS, SWORDSMITH
+    -- PAGE 7: JOIN > PARTY (Matches Screenshot 20)
     -- ========================================================================
-    local partyCard = CreateBentoCard(pgJoinParty.Left, "👤", "Party Join")
-    AddToggle(partyCard, "Auto Join Party", Config.AutoJoinParty, function(v) Config.AutoJoinParty = v end)
-    AddFieldLabel(partyCard, "Party Code")
-    local partyBox = Instance.new("TextBox", partyCard)
-    partyBox.Size = UDim2.new(1, 0, 0, 30)
-    partyBox.BackgroundColor3 = C_INPUT
-    partyBox.TextColor3 = C_TEXT
-    partyBox.PlaceholderText = "enter party code..."
-    partyBox.PlaceholderColor3 = C_SUBTEXT
-    partyBox.Text = Config.PartyCode
-    partyBox.Font = Enum.Font.Gotham
-    partyBox.TextSize = 11
-    partyBox.ClearTextOnFocus = false
-    Instance.new("UICorner", partyBox).CornerRadius = UDim.new(0, 7)
-    Instance.new("UIPadding", partyBox).PaddingLeft = UDim.new(0, 10)
-    partyBox.FocusLost:Connect(function()
-        Config.PartyCode = partyBox.Text
-        SaveConfig()
+    local partyCard = CreateBentoCard(pgJoinParty.Left, "👑", "Party")
+    AddSubLabel(partyCard, "Host")
+    AddFieldLabel(partyCard, "Invite Players")
+    local invDrop = AddDropdownBox(partyCard, GetServerPlayerNames, Config.InvitePlayerTarget, function(v) Config.InvitePlayerTarget = v end)
+    AddToggle(partyCard, "Auto Invite To Party", Config.AutoInviteToParty, function(v) Config.AutoInviteToParty = v end)
+    AddActionBtn(partyCard, "Refresh Players", C_TEXT, function()
+        local list = GetServerPlayerNames()
+        if #list > 1 then invDrop.Set(list[2]) end
     end)
+    AddSubLabel(partyCard, "Join A Player")
+    AddFieldLabel(partyCard, "Player")
+    AddDropdownBox(partyCard, GetServerPlayerNames, Config.JoinPlayerTarget, function(v) Config.JoinPlayerTarget = v end)
+    AddFieldLabel(partyCard, "How To Join")
+    AddDropdownBox(partyCard, { "Party", "Friend", "Teleport" }, Config.HowToJoinPlayer, function(v) Config.HowToJoinPlayer = v end)
+    AddToggle(partyCard, "Auto Join Player", Config.AutoJoinPlayer, function(v) Config.AutoJoinPlayer = v end)
 
+    local userStuffsCard = CreateBentoCard(pgJoinParty.Right, "🛡", "User Stuffs")
+    AddFieldLabel(userStuffsCard, "Players")
+    AddDropdownBox(userStuffsCard, GetServerPlayerNames, Config.UserStuffsPlayer, function(v) Config.UserStuffsPlayer = v end)
+    AddFieldLabel(userStuffsCard, "Whitelist (usernames)")
+    AddTextBox(userStuffsCard, "username1, username2", Config.WhitelistUsernames, function(txt) Config.WhitelistUsernames = txt end)
+    AddSlider(userStuffsCard, "Wait Before Leaving", 0, 300, Config.WaitBeforeLeaving, " s", nil, function(v) Config.WaitBeforeLeaving = v end)
+    AddToggle(userStuffsCard, "Leave When They Are Gone", Config.LeaveWhenGone, function(v) Config.LeaveWhenGone = v end)
+    AddToggle(userStuffsCard, "Leave When Others Are Here", Config.LeaveWhenOthersHere, function(v) Config.LeaveWhenOthersHere = v end)
+    AddToggle(userStuffsCard, "Only Auto Join With Them", Config.OnlyAutoJoinWithThem, function(v) Config.OnlyAutoJoinWithThem = v end)
+
+    -- ========================================================================
+    -- PAGE 8: JOIN > CASTLE / EVENTS / PORTALS / CONTRACTS / RAIDS
+    -- ========================================================================
     local icCard = CreateBentoCard(pgJoinEvents.Left, "👑", "Infinity Castle")
     AddToggle(icCard, "Auto Infinity Castle", Config.AutoInfinityCastle, function(v) Config.AutoInfinityCastle = v end)
     AddToggle(icCard, "Matchmaking", Config.CastleMatchmaking, function(v) Config.CastleMatchmaking = v end)
     AddDropdownBox(icCard, { "Next Floor", "Fixed Floor" }, Config.CastleFloorMode, function(v) Config.CastleFloorMode = v end)
-    AddSlider(icCard, "Fixed Floor", 1, 100, Config.CastleFixedFloor, "", function(v) Config.CastleFixedFloor = v end)
+    AddSlider(icCard, "Fixed Floor", 1, 100, Config.CastleFixedFloor, "", nil, function(v) Config.CastleFixedFloor = v end)
     AddDropdownBox(icCard, { "Normal", "Hard", "Nightmare" }, Config.CastleDifficulty, function(v) Config.CastleDifficulty = v end)
 
     local ecCard = CreateBentoCard(pgJoinEvents.Right, "☆", "Event Challenge (Summer Hunt)")
@@ -2102,6 +2289,9 @@ local function BuildBentoHub()
     AddToggle(ecCard, "Matchmaking", Config.EventMatchmaking, function(v) Config.EventMatchmaking = v end)
     AddToggle(ecCard, "Hunt Bingo Maps", Config.HuntBingoMaps, function(v) Config.HuntBingoMaps = v end)
     AddToggle(ecCard, "Hunt Unwon Weathers", Config.HuntUnwonWeathers, function(v) Config.HuntUnwonWeathers = v end)
+    AddToggle(ecCard, "Auto Contracts", Config.AutoContracts, function(v) Config.AutoContracts = v end)
+    AddToggle(ecCard, "Auto Artifact Raid", Config.AutoArtifactRaid, function(v) Config.AutoArtifactRaid = v end)
+    AddToggle(ecCard, "Auto Raid", Config.AutoRaid, function(v) Config.AutoRaid = v end)
 
     local portCard = CreateBentoCard(pgJoinEvents.Left, "🌀", "Portals")
     AddToggle(portCard, "Auto Portal", Config.AutoPortal, function(v) Config.AutoPortal = v end)
@@ -2110,43 +2300,206 @@ local function BuildBentoHub()
     AddToggle(portCard, "Most Uses Left First", Config.MostUsesLeftFirst, function(v) Config.MostUsesLeftFirst = v end)
     AddToggle(portCard, "Matchmaking", Config.PortalMatchmaking, function(v) Config.PortalMatchmaking = v end)
 
-    local dngCard = CreateBentoCard(pgJoinDungeon.Left, "💀", "Dungeon")
-    AddToggle(dngCard, "Auto Join Dungeon", Config.AutoDungeon, function(v) Config.AutoDungeon = v end)
-    AddToggle(dngCard, "Matchmaking", Config.DungeonMatchmaking, function(v) Config.DungeonMatchmaking = v end)
+    -- ========================================================================
+    -- PAGE 9: JOIN > DUNGEON (Matches Screenshot 22)
+    -- ========================================================================
+    local dngRunCard = CreateBentoCard(pgJoinDungeon.Left, "💀", "Dungeon Run")
+    AddSubLabel(dngRunCard, "Run")
+    AddToggle(dngRunCard, "Auto Dungeon", Config.AutoDungeon, function(v) Config.AutoDungeon = v end)
+    AddFieldLabel(dngRunCard, "Open Chests")
+    AddDropdownBox(dngRunCard, { "Every Chest Room", "Rare Chests Only", "Never" }, Config.OpenChestsMode, function(v) Config.OpenChestsMode = v end)
+    AddSlider(dngRunCard, "Stop After Losing A Room", 0, 10, Config.StopAfterLosingRoom, "", "never", function(v) Config.StopAfterLosingRoom = v end)
+    AddToggle(dngRunCard, "Take Shrines", Config.TakeShrines, function(v) Config.TakeShrines = v end)
+    AddToggle(dngRunCard, "Buy Shop Items", Config.BuyShopItems, function(v) Config.BuyShopItems = v end)
+    AddSubLabel(dngRunCard, "Rooms")
+    AddToggle(dngRunCard, "Avoid Curses", Config.AvoidCurses, function(v) Config.AvoidCurses = v end)
+    AddFieldLabel(dngRunCard, "Curses To Avoid")
+    AddDropdownBox(dngRunCard, { "Curse of Armor, Curse of Burst", "Curse of Speed", "Curse of Regen", "None" }, Config.CursesToAvoid, function(v) Config.CursesToAvoid = v end)
+    AddToggle(dngRunCard, "Look Ahead", Config.LookAhead, function(v) Config.LookAhead = v end)
+    AddSubLabel(dngRunCard, "No run yet")
 
-    local tmCard = CreateBentoCard(pgJoinTeams.Left, "👥", "Teams")
-    AddToggle(tmCard, "Auto Equip Best Team", Config.AutoEquipBestTeam, function(v) Config.AutoEquipBestTeam = v end)
+    local roomPrioCard = CreateBentoCard(pgJoinDungeon.Left, "⇄", "Room Priority")
+    AddSlider(roomPrioCard, "Rare Chest", 1, 10, Config.RareChestPriority, "", nil, function(v) Config.RareChestPriority = v end)
 
+    local roomTeamsCard = CreateBentoCard(pgJoinDungeon.Right, "👥", "Room Teams")
+    AddToggle(roomTeamsCard, "Team By Room Weakness", Config.TeamByRoomWeakness, function(v) Config.TeamByRoomWeakness = v end)
+    AddFieldLabel(roomTeamsCard, "Physical Weak Rooms")
+    AddDropdownBox(roomTeamsCard, TEAM_OPTIONS, Config.PhysicalWeakTeam, function(v) Config.PhysicalWeakTeam = v end)
+    AddFieldLabel(roomTeamsCard, "Magic Weak Rooms")
+    AddDropdownBox(roomTeamsCard, TEAM_OPTIONS, Config.MagicWeakTeam, function(v) Config.MagicWeakTeam = v end)
+    AddFieldLabel(roomTeamsCard, "Other Weak Rooms")
+    AddDropdownBox(roomTeamsCard, TEAM_OPTIONS, Config.OtherWeakTeam, function(v) Config.OtherWeakTeam = v end)
+
+    local shopPrioCard = CreateBentoCard(pgJoinDungeon.Right, "🛍", "Shop Priority")
+    AddDropdownBox(shopPrioCard, { "Stat Cube", "Divine Wish", "Star Remnant", "Gems" }, Config.ShopPriorityItem, function(v) Config.ShopPriorityItem = v end)
+
+    -- ========================================================================
+    -- PAGE 10: JOIN > TEAMS (Matches Screenshot 23)
+    -- ========================================================================
+    local teamsLeftCard = CreateBentoCard(pgJoinTeams.Left, "👥", "Auto Equip Team")
+    AddToggle(teamsLeftCard, "Auto Equip Team", Config.AutoEquipTeam, function(v) Config.AutoEquipTeam = v end)
+    AddFieldLabel(teamsLeftCard, "Challenge")
+    AddDropdownBox(teamsLeftCard, TEAM_OPTIONS, Config.TeamChallenge, function(v) Config.TeamChallenge = v end)
+    AddFieldLabel(teamsLeftCard, "Daily Challenge")
+    AddDropdownBox(teamsLeftCard, TEAM_OPTIONS, Config.TeamDailyChallenge, function(v) Config.TeamDailyChallenge = v end)
+    AddFieldLabel(teamsLeftCard, "Contracts")
+    AddDropdownBox(teamsLeftCard, TEAM_OPTIONS, Config.TeamContracts, function(v) Config.TeamContracts = v end)
+    AddFieldLabel(teamsLeftCard, "Event Challenge")
+    AddDropdownBox(teamsLeftCard, TEAM_OPTIONS, Config.TeamEventChallenge, function(v) Config.TeamEventChallenge = v end)
+    AddFieldLabel(teamsLeftCard, "Artifact Raid")
+    AddDropdownBox(teamsLeftCard, TEAM_OPTIONS, Config.TeamArtifactRaid, function(v) Config.TeamArtifactRaid = v end)
+    AddFieldLabel(teamsLeftCard, "Swordsmith Village")
+    AddDropdownBox(teamsLeftCard, TEAM_OPTIONS, Config.TeamSwordsmith, function(v) Config.TeamSwordsmith = v end)
+    AddFieldLabel(teamsLeftCard, "Portals")
+    AddDropdownBox(teamsLeftCard, TEAM_OPTIONS, Config.TeamPortals, function(v) Config.TeamPortals = v end)
+    AddFieldLabel(teamsLeftCard, "Dungeon")
+    AddDropdownBox(teamsLeftCard, TEAM_OPTIONS, Config.TeamDungeon, function(v) Config.TeamDungeon = v end)
+
+    local savedTeamsCard = CreateBentoCard(pgJoinTeams.Right, "☰", "Saved Teams")
+    local stText = Instance.new("TextLabel", savedTeamsCard)
+    stText.Size = UDim2.new(1, 0, 0, 96)
+    stText.BackgroundTransparency = 1
+    stText.TextXAlignment = Enum.TextXAlignment.Left
+    stText.TextYAlignment = Enum.TextYAlignment.Top
+    stText.TextColor3 = C_SUBTEXT
+    stText.Font = Enum.Font.Gotham
+    stText.TextSize = 11
+    stText.Text = "Team 1: empty\nTeam 2: empty\nTeam 3: empty\nTeam 4: empty\nTeam 5: empty\nTeam 6: empty"
+
+    -- ========================================================================
+    -- PAGE 11: JOIN > SWORDSMITH & DEFENSES (Matches Screenshot 24)
+    -- ========================================================================
     local swCard = CreateBentoCard(pgJoinVillage.Left, "⚔", "Swordsmith Village")
     AddToggle(swCard, "Auto Swordsmith Village", Config.AutoSwordsmith, function(v) Config.AutoSwordsmith = v end)
     AddToggle(swCard, "Matchmaking", Config.SwordsmithMatchmaking, function(v) Config.SwordsmithMatchmaking = v end)
+    AddFieldLabel(swCard, "Stage")
     AddDropdownBox(swCard, { "Best Available", "Day Stage", "Night Stage" }, Config.SwordsmithStage, function(v) Config.SwordsmithStage = v end)
     AddToggle(swCard, "Blood Moon When Up", Config.BloodMoonWhenUp, function(v) Config.BloodMoonWhenUp = v end)
-    AddSlider(swCard, "Skip A Stage After Losses", 0, 10, Config.SkipStageAfterLosses, "", function(v) Config.SkipStageAfterLosses = v end)
+    AddSlider(swCard, "Skip A Stage After Losses", 0, 10, Config.SkipStageAfterLosses, "", nil, function(v) Config.SkipStageAfterLosses = v end)
+    AddSubLabel(swCard, "Night, 47m left  ·  plays Day Stage")
 
-    local mtCard = CreateBentoCard(pgJoinVillage.Right, "☰", "Misty Tower")
+    local mtCard = CreateBentoCard(pgJoinVillage.Left, "☰", "Misty Tower")
     AddToggle(mtCard, "Auto Misty Tower", Config.AutoMistyTower, function(v) Config.AutoMistyTower = v end)
     AddToggle(mtCard, "Matchmaking", Config.MistyMatchmaking, function(v) Config.MistyMatchmaking = v end)
-    AddSlider(mtCard, "Rest After Losses", 0, 10, Config.RestAfterLosses, "", function(v) Config.RestAfterLosses = v end)
+    AddSlider(mtCard, "Rest After Losses", 0, 10, Config.RestAfterLosses, "", nil, function(v) Config.RestAfterLosses = v end)
+    AddSubLabel(mtCard, "next floor 1")
+
+    local defCard = CreateBentoCard(pgJoinVillage.Right, "🛡", "Defenses")
+    AddSubLabel(defCard, "Match")
+    AddToggle(defCard, "Auto Place Defenses", Config.AutoPlaceDefenses, function(v) Config.AutoPlaceDefenses = v end)
+    AddFieldLabel(defCard, "Place At")
+    AddDropdownBox(defCard, { "Damage Units", "Path Position", "Base" }, Config.DefensesPlaceAt, function(v) Config.DefensesPlaceAt = v end)
+    AddSlider(defCard, "Path Position", 1, 100, Config.DefensesPathPos, "%", nil, function(v) Config.DefensesPathPos = v end)
+    AddToggle(defCard, "Auto Buy Village Shop", Config.AutoBuyVillageShop, function(v) Config.AutoBuyVillageShop = v end)
+    AddFieldLabel(defCard, "Buy Rarities")
+    AddDropdownBox(defCard, { "Rare, Epic, Legendary, Mythic, Secret", "Legendary, Mythic, Secret", "Mythic, Secret" }, Config.BuyRarities, function(v) Config.BuyRarities = v end)
+    AddFieldLabel(defCard, "Only Buy (blank = by rarity)")
+    AddDropdownBox(defCard, { "--", "Flame Lantern", "Nichirin Turret", "Wisteria Ward", "Thunder Totem" }, Config.OnlyBuyByName, function(v) Config.OnlyBuyByName = v end)
+    AddSubLabel(defCard, "Lobby")
+    AddToggle(defCard, "Auto Equip Best", Config.AutoEquipBestDefense, function(v) Config.AutoEquipBestDefense = v end)
+    AddToggle(defCard, "Auto Repair", Config.AutoRepairDefenses, function(v) Config.AutoRepairDefenses = v end)
+    AddSlider(defCard, "Repair Below", 10, 90, Config.RepairBelowPct, "%", nil, function(v) Config.RepairBelowPct = v end)
+    AddToggle(defCard, "Auto Scrap When Full", Config.AutoScrapWhenFull, function(v) Config.AutoScrapWhenFull = v end)
+    AddFieldLabel(defCard, "Scrap Up To")
+    AddDropdownBox(defCard, { "Common", "Rare", "Epic", "Legendary" }, Config.ScrapUpToRarity, function(v) Config.ScrapUpToRarity = v end)
 
     -- ========================================================================
-    -- PAGES 12-16: PRIORITY, GAME, LOBBY, WEBHOOK, MISC
+    -- PAGE 12: PRIORITY (Matches Screenshot 25)
     -- ========================================================================
-    local prCard = CreateBentoCard(pgPriority.Left, "🏅", "Target Priority")
-    AddToggle(prCard, "Target Boss First", Config.TargetBossFirst, function(v) Config.TargetBossFirst = v end)
-    AddToggle(prCard, "Target Fastest Enemy", Config.TargetFastest, function(v) Config.TargetFastest = v end)
+    local prCard = CreateBentoCard(pgPriority.Left, "🏅", "Join Priority")
+    AddSlider(prCard, "Challenge", 1, 10, Config.PriorityChallenge, "", nil, function(v) Config.PriorityChallenge = v end)
+    AddSlider(prCard, "Daily Challenge", 1, 10, Config.PriorityDailyChallenge, "", nil, function(v) Config.PriorityDailyChallenge = v end)
+    AddSlider(prCard, "Contracts", 1, 10, Config.PriorityContracts, "", nil, function(v) Config.PriorityContracts = v end)
+    AddSlider(prCard, "Event Challenge", 1, 10, Config.PriorityEventChallenge, "", nil, function(v) Config.PriorityEventChallenge = v end)
+    AddSlider(prCard, "Artifact Raid", 1, 10, Config.PriorityArtifactRaid, "", nil, function(v) Config.PriorityArtifactRaid = v end)
+    AddSlider(prCard, "Swordsmith Village", 1, 10, Config.PrioritySwordsmith, "", nil, function(v) Config.PrioritySwordsmith = v end)
+    AddSlider(prCard, "Portals", 1, 10, Config.PriorityPortals, "", nil, function(v) Config.PriorityPortals = v end)
+    AddSlider(prCard, "Dungeon", 1, 10, Config.PriorityDungeon, "", nil, function(v) Config.PriorityDungeon = v end)
+    AddSlider(prCard, "Raid", 1, 10, Config.PriorityRaid, "", nil, function(v) Config.PriorityRaid = v end)
+    AddSlider(prCard, "Infinity Castle", 1, 10, Config.PriorityInfinityCastle, "", nil, function(v) Config.PriorityInfinityCastle = v end)
 
-    local gmCard = CreateBentoCard(pgGame.Left, "🎮", "Game Settings")
-    AddToggle(gmCard, "Auto Start", Config.AutoStartMatch, function(v) Config.AutoStartMatch = v end)
-    AddToggle(gmCard, "Auto Skip Waves", Config.AutoSkipWaves, function(v) Config.AutoSkipWaves = v end)
-    AddToggle(gmCard, "Auto Replay", Config.AutoReplay, function(v) Config.AutoReplay = v end)
-    AddToggle(gmCard, "Claim Clear Rewards", Config.ClaimClearRewards, function(v) Config.ClaimClearRewards = v end)
+    local prInfoCard = CreateBentoCard(pgPriority.Right, "⚡", "Active Queue Order")
+    local prQueueLbl = Instance.new("TextLabel", prInfoCard)
+    prQueueLbl.Size = UDim2.new(1, 0, 0, 140)
+    prQueueLbl.BackgroundTransparency = 1
+    prQueueLbl.TextWrapped = true
+    prQueueLbl.TextXAlignment = Enum.TextXAlignment.Left
+    prQueueLbl.TextYAlignment = Enum.TextYAlignment.Top
+    prQueueLbl.TextColor3 = C_SUBTEXT
+    prQueueLbl.Font = Enum.Font.Gotham
+    prQueueLbl.TextSize = 11
+    prQueueLbl.Text = "Higher weight runs first whenever available.\n\n1. Challenge / Daily Challenge\n2. Contracts & Event Challenge\n3. Artifact Raid & Swordsmith Village\n4. Portals & Dungeon\n5. Raid, Infinity Castle & Story Farm"
 
+    -- ========================================================================
+    -- PAGE 13: GAME (Matches Screenshot 26)
+    -- ========================================================================
+    local matchCard = CreateBentoCard(pgGame.Left, "▶", "Match")
+    AddSubLabel(matchCard, "Start")
+    AddToggle(matchCard, "Auto Vote Start", Config.AutoVoteStart, function(v) Config.AutoVoteStart = v end)
+    AddToggle(matchCard, "Auto Skip Wave", Config.AutoSkipWave, function(v) Config.AutoSkipWave = v end)
+    AddSubLabel(matchCard, "End")
+    AddToggle(matchCard, "Auto Next", Config.AutoNext, function(v) Config.AutoNext = v end)
+    AddToggle(matchCard, "Auto Retry", Config.AutoRetry, function(v) Config.AutoRetry = v end)
+    AddToggle(matchCard, "Auto Leave", Config.AutoLeave, function(v) Config.AutoLeave = v end)
+    AddToggle(matchCard, "Vote To Lose (XP)", Config.VoteToLoseXP, function(v) Config.VoteToLoseXP = v end)
+
+    local matchStatusRow = Instance.new("Frame", matchCard)
+    matchStatusRow.Size = UDim2.new(1, 0, 0, 22)
+    matchStatusRow.BackgroundTransparency = 1
+    local msLeft = Instance.new("TextLabel", matchStatusRow)
+    msLeft.Size = UDim2.new(0.45, 0, 1, 0)
+    msLeft.BackgroundTransparency = 1
+    msLeft.Text = "Match"
+    msLeft.TextXAlignment = Enum.TextXAlignment.Left
+    msLeft.TextColor3 = C_TEXT
+    msLeft.Font = Enum.Font.Gotham
+    msLeft.TextSize = 12
+
+    local matchPill = Instance.new("TextLabel", matchStatusRow)
+    matchPill.Size = UDim2.new(0, 96, 0, 20)
+    matchPill.Position = UDim2.new(1, -96, 0.5, -10)
+    matchPill.BackgroundColor3 = C_INPUT
+    matchPill.Text = "• In the lobby"
+    matchPill.TextColor3 = C_SUBTEXT
+    matchPill.Font = Enum.Font.GothamSemibold
+    matchPill.TextSize = 10
+    Instance.new("UICorner", matchPill).CornerRadius = UDim.new(1, 0)
+
+    local matchSummaryLbl = Instance.new("TextLabel", matchCard)
+    matchSummaryLbl.Size = UDim2.new(1, 0, 0, 16)
+    matchSummaryLbl.BackgroundTransparency = 1
+    matchSummaryLbl.Text = "Wave 0   0 units out   0 runs   0 skips"
+    matchSummaryLbl.TextXAlignment = Enum.TextXAlignment.Left
+    matchSummaryLbl.TextColor3 = C_SUBTEXT
+    matchSummaryLbl.Font = Enum.Font.Gotham
+    matchSummaryLbl.TextSize = 11
+
+    local abilCard = CreateBentoCard(pgGame.Left, "✦", "Abilities")
+    AddSubLabel(abilCard, "Buff Uptime")
+    AddToggle(abilCard, "Buff Uptime", Config.BuffUptime, function(v) Config.BuffUptime = v end)
+    AddFieldLabel(abilCard, "Units")
+    AddDropdownBox(abilCard, { "Commander, Elfy, Gambler, Griffin", "Commander, Elfy", "All Support Units" }, Config.BuffUnitsList, function(v) Config.BuffUnitsList = v end)
+    AddSubLabel(abilCard, "Auto Ability")
+    AddToggle(abilCard, "Auto Ability", Config.AutoAbility, function(v) Config.AutoAbility = v end)
+
+    local waveRulesCard = CreateBentoCard(pgGame.Right, "≋", "Wave Rules")
+    AddSubLabel(waveRulesCard, "Sell")
+    AddToggle(waveRulesCard, "Sell Farm Units", Config.SellFarmUnits, function(v) Config.SellFarmUnits = v end)
+    AddToggle(waveRulesCard, "Sell All Units (Infinite)", Config.SellAllUnitsInf, function(v) Config.SellAllUnitsInf = v end)
+    AddSubLabel(waveRulesCard, "Leave")
+    AddToggle(waveRulesCard, "Lobby On Infinite Wave", Config.LobbyOnInfiniteWave, function(v) Config.LobbyOnInfiniteWave = v end)
+    AddToggle(waveRulesCard, "Leave When Players Below", Config.LeaveWhenPlayersBelow, function(v) Config.LeaveWhenPlayersBelow = v end)
+
+    -- ========================================================================
+    -- PAGES 14-16: LOBBY, WEBHOOK, MISC
+    -- ========================================================================
     local lbCard = CreateBentoCard(pgLobby.Left, "🏪", "Lobby Automation")
     AddToggle(lbCard, "Auto Claim Daily / Quests", Config.AutoClaimQuests, function(v) Config.AutoClaimQuests = v end)
 
     local whCard = CreateBentoCard(pgWebhook.Left, "🔔", "Discord Webhook")
     AddToggle(whCard, "Send Match Rewards Webhook", Config.SendMatchWebhook, function(v) Config.SendMatchWebhook = v end)
+    AddFieldLabel(whCard, "Webhook URL")
+    AddTextBox(whCard, "https://discord.com/api/webhooks/...", Config.WebhookUrl, function(txt) Config.WebhookUrl = txt end)
 
     local msCard = CreateBentoCard(pgMisc.Left, "🔧", "Misc & Performance")
     AddToggle(msCard, "Anti-AFK Protection", Config.AntiAfkEnabled, function(v) Config.AntiAfkEnabled = v end)
@@ -2162,7 +2515,7 @@ local function BuildBentoHub()
         end
     end)
 
-    SelectPage("JoinStory")
+    SelectPage("Priority")
 
     -- Live Telemetry Loop
     local frames = 0
@@ -2184,6 +2537,8 @@ local function BuildBentoHub()
 
             local w = GetCurrentWave()
             Config.CurrentWave = w
+            local inLobby = IsInLobby()
+            local unitsOut = #GetOwnedUnits()
 
             mSession.Text = string.format("%dm %ds", math.floor(elapsed / 60), elapsed % 60)
             mFeat.Text    = tostring(CountActiveFeatures())
@@ -2193,6 +2548,10 @@ local function BuildBentoHub()
             mRuns.Text    = tostring(Config.Runs)
             mWave.Text    = tostring(w)
             mSteps.Text   = tostring(#MacroEngine.Steps)
+
+            matchPill.Text = inLobby and "• In the lobby" or "• In match"
+            matchPill.TextColor3 = inLobby and C_SUBTEXT or C_ACCENT
+            matchSummaryLbl.Text = string.format("Wave %d   %d units out   %d runs   %d skips", w, unitsOut, Config.Runs, Config.Skips)
 
             idlePill.Text = "• " .. MacroEngine.Status
             idlePill.TextColor3 = (MacroEngine.Status == "recording" or MacroEngine.Status == "playing") and C_ACCENT or C_SUBTEXT
@@ -2211,14 +2570,9 @@ local HubGui = BuildBentoHub()
 task.spawn(function()
     while task.wait(0.35) do
         if IsInLobby() then
-            StepLobbyJoinAndMatchmaking(HubGui)
+            StepLobbyAutomation(HubGui)
         else
-            if Config.AutoStartMatch then
-                CallRemoteFuzzy({ "vote_start", "start_game", "ready" })
-            end
-            if Config.AutoSkipWaves then
-                CallRemoteFuzzy({ "vote_wave_skip", "skip_wave" })
-            end
+            StepInMatchAutomation()
             StepMacroRuntime()
         end
     end
