@@ -1,7 +1,8 @@
 -- ============================================================================
--- ANIME ADVENTURES - AUTO MODE / PLAY HERE vs FIND MATCH + UNIT MACRO
--- Save as 'AA_Auto_Macro.lua' in your executor workspace / autoexec folder.
+-- ANIME ADVENTURES - HARDENED AUTO MODE / PLAY HERE vs FIND MATCH + UNIT MACRO
 -- ============================================================================
+
+print("[AA_Auto_Macro] Initializing...")
 
 if not game:IsLoaded() then
     game.Loaded:Wait()
@@ -13,12 +14,18 @@ local UserInputService = game:GetService("UserInputService")
 local VirtualUser = game:GetService("VirtualUser")
 local GuiService = game:GetService("GuiService")
 local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
 
-local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 15)
+local LocalPlayer = Players.LocalPlayer
+while not LocalPlayer do
+    task.wait(0.1)
+    LocalPlayer = Players.LocalPlayer
+end
+
+local PlayerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 15)
 local IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
--- Safe executor capability wrappers (never calls nil)
+-- Safe file helpers
 local function SafeIsFile(path)
     if type(isfile) == "function" then
         local ok, res = pcall(isfile, path)
@@ -43,19 +50,6 @@ local function SafeWriteFile(path, content)
     end
 end
 
--- Optional teleport persistence (guarded)
-local SCRIPT_FILE = "AA_Auto_Macro.lua"
-local queueTP = (type(queue_on_teleport) == "function" and queue_on_teleport)
-    or (type(syn) == "table" and type(syn.queue_on_teleport) == "function" and syn.queue_on_teleport)
-    or (type(fluxus) == "table" and type(fluxus.queue_on_teleport) == "function" and fluxus.queue_on_teleport)
-
-if queueTP then
-    local src = SafeReadFile(SCRIPT_FILE)
-    if src and #src > 0 then
-        pcall(queueTP, src)
-    end
-end
-
 -- Anti-AFK
 LocalPlayer.Idled:Connect(function()
     pcall(function()
@@ -71,10 +65,10 @@ local CONFIG_FILE = "AA_Auto_Macro_Config.json"
 local Config = {
     AutoEnabled = false,
     StageMode = "Summer Event",   -- "Summer Event", "Misty Village", "Regular Stages"
-    QueueType = "Find Match",     -- "Play Here" (lobby/solo) OR "Find Match" (matchmaking)
+    QueueType = "Find Match",     -- "Play Here" or "Find Match"
     MacroName = "default_unit_macro",
     AutoPlayMacro = true,
-    StepDelay = 2.0
+    StepDelay = 0.25
 }
 
 local function LoadConfig()
@@ -100,8 +94,29 @@ end
 LoadConfig()
 
 -- ============================================================================
+-- GUI CONTAINER RESOLVER (gethui -> CoreGui -> PlayerGui)
+-- ============================================================================
+local function GetSafeGuiParent()
+    if type(gethui) == "function" then
+        local ok, hui = pcall(gethui)
+        if ok and typeof(hui) == "Instance" then
+            return hui
+        end
+    end
+    local okCore = pcall(function()
+        local _ = CoreGui.Name
+    end)
+    if okCore and CoreGui then
+        return CoreGui
+    end
+    return PlayerGui or LocalPlayer:WaitForChild("PlayerGui", 10)
+end
+
+-- ============================================================================
 -- SAFE GUI CLICKER & BUTTON FINDER
 -- ============================================================================
+local StatusText = "Idle (Auto Match OFF)"
+
 local function SafeClick(btn)
     if not btn or not btn:IsA("GuiButton") then return false end
     local clicked = false
@@ -139,7 +154,7 @@ end
 
 local function IsReallyVisible(guiObj)
     local cur = guiObj
-    while cur and cur ~= PlayerGui do
+    while cur and cur ~= PlayerGui and cur ~= CoreGui do
         if cur:IsA("ScreenGui") and not cur.Enabled then
             return false
         end
@@ -166,11 +181,18 @@ local function GetButtonTextBlob(btn)
     return table.concat(parts, " "):lower()
 end
 
-local function FindButtonContaining(phrase)
+local function FindButtonContaining(phrase, ignoreRoot)
+    if not PlayerGui then
+        PlayerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    end
     if not PlayerGui then return nil end
+
     local target = phrase:lower()
     for _, d in ipairs(PlayerGui:GetDescendants()) do
-        if (d:IsA("TextButton") or d:IsA("ImageButton")) and IsReallyVisible(d) then
+        if (not ignoreRoot or not d:IsDescendantOf(ignoreRoot))
+            and (d:IsA("TextButton") or d:IsA("ImageButton"))
+            and IsReallyVisible(d)
+        then
             local blob = GetButtonTextBlob(d)
             if blob:find(target, 1, true) then
                 return d
@@ -199,25 +221,7 @@ local QueueState = {
     Cooldown = 2.5
 }
 
-local function TryOpenPlayMenuIfNeeded()
-    -- If either the mode picker or "Join Matchmaking?" is already visible, do nothing
-    if FindButtonContaining("summer event") or FindButtonContaining("misty village") or FindButtonContaining("regular stages") then
-        return
-    end
-    if FindButtonContaining("play here") or FindButtonContaining("find match") then
-        return
-    end
-
-    -- Otherwise look for a visible Play / Areas / Event button to open the mode selector
-    local triggerKeywords = { "play", "areas", "summer", "event" }
-    for _, kw in ipairs(triggerKeywords) do
-        local btn = FindButtonContaining(kw)
-        if btn and not btn:IsDescendantOf(PlayerGui:FindFirstChild("AA_AutoMacro_UI") or Instance.new("Folder")) then
-            SafeClick(btn)
-            break
-        end
-    end
-end
+local PanelGuiRef = nil
 
 local function StepAutoMatchmaking()
     if not Config.AutoEnabled or not IsInLobby() or QueueState.Busy then
@@ -231,30 +235,42 @@ local function StepAutoMatchmaking()
     QueueState.LastRun = os.clock()
 
     pcall(function()
-        -- Step 1: If "Join Matchmaking?" ("Play Here" / "Find Match") is visible, click chosen option
         local desiredPhrase = (Config.QueueType == "Play Here") and "play here" or "find match"
         local fallbackPhrase = (Config.QueueType == "Play Here") and "find match" or "play here"
 
-        local queueBtn = FindButtonContaining(desiredPhrase) or FindButtonContaining(fallbackPhrase)
+        -- 1. Click "Play Here" or "Find Match" if visible
+        local queueBtn = FindButtonContaining(desiredPhrase, PanelGuiRef) or FindButtonContaining(fallbackPhrase, PanelGuiRef)
         if queueBtn then
+            StatusText = "Clicking: " .. Config.QueueType
             SafeClick(queueBtn)
             return
         end
 
-        -- Step 2: If "Where do you want to Play?" is visible, click selected mode
-        local modeBtn = FindButtonContaining(Config.StageMode)
+        -- 2. Click Stage Mode ("Summer Event", "Misty Village", "Regular Stages") if visible
+        local modeBtn = FindButtonContaining(Config.StageMode, PanelGuiRef)
         if modeBtn then
+            StatusText = "Selecting: " .. Config.StageMode
             SafeClick(modeBtn)
             task.wait(0.35)
-            queueBtn = FindButtonContaining(desiredPhrase) or FindButtonContaining(fallbackPhrase)
+            queueBtn = FindButtonContaining(desiredPhrase, PanelGuiRef) or FindButtonContaining(fallbackPhrase, PanelGuiRef)
             if queueBtn then
+                StatusText = "Clicking: " .. Config.QueueType
                 SafeClick(queueBtn)
             end
             return
         end
 
-        -- Step 3: Otherwise open the play menu once per cooldown
-        TryOpenPlayMenuIfNeeded()
+        -- 3. Otherwise try opening the Play menu once per cooldown
+        for _, kw in ipairs({ "play", "areas", "summer", "event" }) do
+            local openBtn = FindButtonContaining(kw, PanelGuiRef)
+            if openBtn then
+                StatusText = "Opening Play menu (" .. kw .. ")"
+                SafeClick(openBtn)
+                return
+            end
+        end
+
+        StatusText = "Lobby: waiting for Play prompt..."
     end)
 
     QueueState.Busy = false
@@ -281,11 +297,10 @@ end
 
 local function SaveMacroSteps()
     SaveConfig()
-    local payload = {
+    SafeWriteFile(GetMacroPath(Config.MacroName), HttpService:JSONEncode({
         name = Config.MacroName,
         steps = Macro.Steps
-    }
-    SafeWriteFile(GetMacroPath(Config.MacroName), HttpService:JSONEncode(payload))
+    }))
 end
 
 local function LoadMacroSteps()
@@ -316,11 +331,8 @@ local function GetOwnedUnits()
 end
 
 local function GetOwnedUnitSlot(unitInstance)
-    local owned = GetOwnedUnits()
-    for idx, u in ipairs(owned) do
-        if u == unitInstance then
-            return idx
-        end
+    for idx, u in ipairs(GetOwnedUnits()) do
+        if u == unitInstance then return idx end
     end
     return 1
 end
@@ -329,32 +341,26 @@ local function GetOwnedUnitAtSlot(slot)
     return GetOwnedUnits()[slot]
 end
 
-local function FindRemoteFuzzy(patterns)
+local function CallRemoteFuzzy(patterns, ...)
+    local args = { ... }
     for _, desc in ipairs(ReplicatedStorage:GetDescendants()) do
         if desc:IsA("RemoteEvent") or desc:IsA("RemoteFunction") then
             local low = desc.Name:lower()
             for _, pat in ipairs(patterns) do
                 if low:find(pat:lower(), 1, true) then
-                    return desc
+                    local ok, res = pcall(function()
+                        if desc:IsA("RemoteEvent") then
+                            desc:FireServer(unpack(args))
+                        else
+                            return desc:InvokeServer(unpack(args))
+                        end
+                    end)
+                    if ok then return res end
                 end
             end
         end
     end
     return nil
-end
-
-local function CallRemoteFuzzy(patterns, ...)
-    local rem = FindRemoteFuzzy(patterns)
-    if not rem then return nil end
-    local args = { ... }
-    local ok, result = pcall(function()
-        if rem:IsA("RemoteEvent") then
-            rem:FireServer(unpack(args))
-        elseif rem:IsA("RemoteFunction") then
-            return rem:InvokeServer(unpack(args))
-        end
-    end)
-    return ok and result or nil
 end
 
 local function InstallUnitMacroHook()
@@ -374,7 +380,6 @@ local function InstallUnitMacroHook()
                     local rName = self.Name:lower()
                     local t = os.clock() - Macro.StartClock
 
-                    -- Unit placement (typically unitId, CFrame)
                     if (rName:find("spawn") or rName:find("place")) and typeof(args[2]) == "CFrame" then
                         local cf = args[2]
                         table.insert(Macro.Steps, {
@@ -383,14 +388,12 @@ local function InstallUnitMacroHook()
                             unitId = tostring(args[1]),
                             pos = { cf.X, cf.Y, cf.Z }
                         })
-                    -- Unit upgrade
                     elseif rName:find("upgrade") and typeof(args[1]) == "Instance" then
                         table.insert(Macro.Steps, {
                             t = t,
                             kind = "upgrade",
                             slot = GetOwnedUnitSlot(args[1])
                         })
-                    -- Unit sell
                     elseif rName:find("sell") and typeof(args[1]) == "Instance" then
                         table.insert(Macro.Steps, {
                             t = t,
@@ -405,9 +408,7 @@ local function InstallUnitMacroHook()
         end)
     end)
 
-    if ok then
-        Macro.Hooked = true
-    end
+    if ok then Macro.Hooked = true end
 end
 
 local function StartRecordingMacro()
@@ -416,23 +417,24 @@ local function StartRecordingMacro()
     Macro.Steps = {}
     Macro.StartClock = os.clock()
     Macro.Recording = true
+    StatusText = "Recording unit actions..."
 end
 
 local function StopRecordingMacro()
     if not Macro.Recording then return end
     Macro.Recording = false
     SaveMacroSteps()
+    StatusText = "Saved " .. tostring(#Macro.Steps) .. " macro steps"
 end
 
 local function StartPlayingMacro()
-    if Macro.Recording then
-        StopRecordingMacro()
-    end
+    if Macro.Recording then StopRecordingMacro() end
     local loaded = LoadMacroSteps()
     Macro.Steps = loaded
     Macro.PlayIndex = 1
     Macro.PlayStartClock = os.clock()
     Macro.Playing = (#loaded > 0)
+    StatusText = Macro.Playing and ("Playing macro (" .. #loaded .. " steps)") or "No macro steps saved"
     return Macro.Playing, #loaded
 end
 
@@ -454,24 +456,18 @@ local function StepMacroPlayback()
     while Macro.PlayIndex <= #Macro.Steps do
         local step = Macro.Steps[Macro.PlayIndex]
         if elapsed >= (step.t or 0) then
+            StatusText = "Macro step " .. Macro.PlayIndex .. "/" .. #Macro.Steps
             if step.kind == "place" and type(step.pos) == "table" then
-                local cf = CFrame.new(step.pos[1], step.pos[2], step.pos[3])
-                CallRemoteFuzzy({ "spawn_unit", "place_unit" }, step.unitId, cf)
+                CallRemoteFuzzy({ "spawn_unit", "place_unit" }, step.unitId, CFrame.new(step.pos[1], step.pos[2], step.pos[3]))
             elseif step.kind == "upgrade" then
                 local unitInst = GetOwnedUnitAtSlot(step.slot or 1)
-                if unitInst then
-                    CallRemoteFuzzy({ "upgrade_unit_ingame", "upgrade_unit" }, unitInst)
-                end
+                if unitInst then CallRemoteFuzzy({ "upgrade_unit_ingame", "upgrade_unit" }, unitInst) end
             elseif step.kind == "sell" then
                 local unitInst = GetOwnedUnitAtSlot(step.slot or 1)
-                if unitInst then
-                    CallRemoteFuzzy({ "sell_unit", "sell" }, unitInst)
-                end
+                if unitInst then CallRemoteFuzzy({ "sell_unit", "sell" }, unitInst) end
             end
             Macro.PlayIndex = Macro.PlayIndex + 1
-            if Config.StepDelay and Config.StepDelay > 0 then
-                task.wait(math.min(Config.StepDelay, 0.25))
-            end
+            task.wait(0.15)
         else
             break
         end
@@ -479,32 +475,68 @@ local function StepMacroPlayback()
 end
 
 -- ============================================================================
--- COMPACT MOBILE-FRIENDLY CONTROL PANEL
+-- UI BUILDER (HIGH DISPLAYORDER + TOGGLE BUTTON)
 -- ============================================================================
+local StatusLabelRef = nil
+
 local function BuildPanel()
-    if not PlayerGui then return end
-    local existing = PlayerGui:FindFirstChild("AA_AutoMacro_UI")
-    if existing then existing:Destroy() end
+    local guiParent = GetSafeGuiParent()
+    if not guiParent then
+        warn("[AA_Auto_Macro] Could not find GUI container!")
+        return
+    end
+
+    for _, container in ipairs({ guiParent, PlayerGui, CoreGui }) do
+        if container then
+            local old = container:FindFirstChild("AA_AutoMacro_UI")
+            if old then pcall(function() old:Destroy() end) end
+        end
+    end
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "AA_AutoMacro_UI"
     sg.ResetOnSpawn = false
+    sg.IgnoreGuiInset = true
+    sg.DisplayOrder = 999999
     sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    sg.Parent = PlayerGui
+    sg.Parent = guiParent
+    PanelGuiRef = sg
+
+    -- Small toggle pill so you can always show/hide the panel
+    local pill = Instance.new("TextButton")
+    pill.Name = "TogglePill"
+    pill.Size = UDim2.new(0, 56, 0, 32)
+    pill.Position = UDim2.new(0, 12, 0.22, 0)
+    pill.BackgroundColor3 = Color3.fromRGB(30, 110, 220)
+    pill.TextColor3 = Color3.fromRGB(255, 255, 255)
+    pill.Font = Enum.Font.GothamBold
+    pill.TextSize = 13
+    pill.Text = "AA UI"
+    pill.Active = true
+    pill.Draggable = true
+    pill.Parent = sg
+    Instance.new("UICorner", pill).CornerRadius = UDim.new(0, 8)
 
     local frame = Instance.new("Frame")
     frame.Name = "MainFrame"
-    frame.Size = UDim2.new(0, 250, 0, 235)
-    frame.Position = UDim2.new(0, 14, 0.3, 0)
+    frame.Size = UDim2.new(0, 255, 0, 260)
+    frame.Position = UDim2.new(0.5, -127, 0.5, -130)
     frame.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
     frame.BorderSizePixel = 0
     frame.Active = true
     frame.Draggable = true
+    frame.Visible = true
     frame.Parent = sg
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = frame
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(60, 130, 240)
+    stroke.Thickness = 1.5
+    stroke.Parent = frame
+
+    pill.MouseButton1Click:Connect(function()
+        frame.Visible = not frame.Visible
+    end)
 
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, -12, 0, 26)
@@ -526,9 +558,7 @@ local function BuildPanel()
         b.TextSize = 12
         b.Text = label
         b.Parent = frame
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0, 6)
-        c.Parent = b
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
         return b
     end
 
@@ -540,20 +570,29 @@ local function BuildPanel()
 
     local autoBtn = MakeBtn("Auto Match: " .. (Config.AutoEnabled and "ON" or "OFF"), 34,
         Config.AutoEnabled and Color3.fromRGB(35, 140, 80) or Color3.fromRGB(140, 45, 45))
-
     local modeBtn = MakeBtn("Mode: " .. Config.StageMode, 70, Color3.fromRGB(45, 70, 120))
-
     local queueBtn = MakeBtn("Join Type: " .. Config.QueueType, 106, Color3.fromRGB(45, 105, 125))
-
     local recBtn = MakeBtn("Record Macro: START", 142, Color3.fromRGB(150, 85, 30))
-
     local playMacroBtn = MakeBtn("Play Macro (Now)", 178, Color3.fromRGB(70, 55, 130))
+
+    local statusLbl = Instance.new("TextLabel")
+    statusLbl.Size = UDim2.new(1, -16, 0, 36)
+    statusLbl.Position = UDim2.new(0, 8, 0, 214)
+    statusLbl.BackgroundTransparency = 1
+    statusLbl.Text = "Status: " .. StatusText
+    statusLbl.TextColor3 = Color3.fromRGB(180, 210, 255)
+    statusLbl.Font = Enum.Font.Gotham
+    statusLbl.TextSize = 11
+    statusLbl.TextWrapped = true
+    statusLbl.Parent = frame
+    StatusLabelRef = statusLbl
 
     autoBtn.MouseButton1Click:Connect(function()
         Config.AutoEnabled = not Config.AutoEnabled
         SaveConfig()
         autoBtn.Text = "Auto Match: " .. (Config.AutoEnabled and "ON" or "OFF")
         autoBtn.BackgroundColor3 = Config.AutoEnabled and Color3.fromRGB(35, 140, 80) or Color3.fromRGB(140, 45, 45)
+        StatusText = Config.AutoEnabled and "Auto Match enabled" or "Idle (Auto Match OFF)"
     end)
 
     modeBtn.MouseButton1Click:Connect(function()
@@ -576,7 +615,7 @@ local function BuildPanel()
             recBtn.BackgroundColor3 = Color3.fromRGB(175, 35, 35)
         else
             StopRecordingMacro()
-            recBtn.Text = "Record Macro: START (" .. tostring(#Macro.Steps) .. "s)"
+            recBtn.Text = "Record Macro: START (" .. tostring(#Macro.Steps) .. ")"
             recBtn.BackgroundColor3 = Color3.fromRGB(150, 85, 30)
         end
     end)
@@ -585,21 +624,22 @@ local function BuildPanel()
         local ok, count = StartPlayingMacro()
         playMacroBtn.Text = ok and ("Playing Macro (" .. tostring(count) .. " steps)") or "No Saved Macro Steps"
     end)
+
+    print("[AA_Auto_Macro] UI Loaded into: " .. guiParent.Name)
 end
 
 BuildPanel()
 
--- Reset macro playback index on new match/teleport
 LocalPlayer.OnTeleport:Connect(function()
     Macro.Playing = false
     Macro.PlayIndex = 1
 end)
 
--- ============================================================================
--- MAIN LOOP
--- ============================================================================
 task.spawn(function()
     while task.wait(0.35) do
+        if StatusLabelRef then
+            StatusLabelRef.Text = "Status: " .. StatusText
+        end
         if Config.AutoEnabled and IsInLobby() then
             StepAutoMatchmaking()
         elseif not IsInLobby() then
