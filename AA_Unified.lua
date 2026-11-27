@@ -1,5 +1,5 @@
 -- ============================================================================
--- ANIME ADVENTURES - UNIFIED HUB (MATCHING HOME DASHBOARD + AUTO JOIN & MACRO)
+-- ANIME ADVENTURES - UNIFIED HUB (MATCHING HOME, MACRO & JOIN UI + AUTO JOIN)
 -- Save as 'AA_Unified_Hub.lua' in your executor's 'workspace' and 'autoexec'.
 -- ============================================================================
 
@@ -117,7 +117,19 @@ local STORY_MAPS = {
     "Navy Bay",
     "Fiend City",
     "Spirit World",
-    "Ant Kingdom"
+    "Ant Kingdom",
+    "Space Center",
+    "Haunted Mansion"
+}
+
+local LEGEND_MAPS = {
+    "Dungeon Throne",
+    "Planet Greenie (Legend)",
+    "Walled City (Legend)",
+    "Snowy Town (Legend)",
+    "Sand Village (Legend)",
+    "Navy Bay (Legend)",
+    "Fiend City (Legend)"
 }
 
 local Config = {
@@ -131,7 +143,7 @@ local Config = {
     RecordMacro = false,
     PlayMacro = false,
     EquipMacroUnits = false,
-    PlayBy = "Money",               -- "Money" or "Time"
+    PlayBy = "Money",
     UseMacroMaps = false,
     MapMacros = {
         ["Planet Greenie"] = "None",
@@ -141,7 +153,9 @@ local Config = {
         ["Navy Bay"] = "None",
         ["Fiend City"] = "None",
         ["Spirit World"] = "None",
-        ["Ant Kingdom"] = "None"
+        ["Ant Kingdom"] = "None",
+        ["Space Center"] = "None",
+        ["Haunted Mansion"] = "None"
     },
 
     -- Auto Play (All Modes & Event)
@@ -172,7 +186,29 @@ local Config = {
         [6] = { Priority = 6, MaxPlace = 3, MaxUpgrade = 15, PlaceWave = 1, UpgradeWave = 1, OnHill = false }
     },
 
-    -- Join: Castle / Events / Portals / Swordsmith & Misty Tower
+    -- Join > Story / Challenges (Matches Image 18)
+    AutoJoinStory = false,
+    JoinMode = "Story",             -- "Story", "Legend", "Infinite"
+    JoinWorld = "Planet Greenie",
+    JoinLegendWorld = "Dungeon Throne",
+    JoinAct = "1",
+    JoinDifficulty = "Normal",
+    StoryMatchmaking = false,       -- false = "Play Here", true = "Find Match"
+
+    AutoJoinChallenge = false,
+    AutoJoinDailyChallenge = false,
+    ChallengeMatchmaking = false,   -- false = "Play Here", true = "Find Match"
+    ChallengeDropFilter = "--",
+    ChallengeSkipModifiers = "--",
+
+    -- Join > Party / Dungeon / Teams
+    AutoJoinParty = false,
+    PartyCode = "",
+    AutoDungeon = false,
+    DungeonMatchmaking = true,
+    AutoEquipBestTeam = false,
+
+    -- Join > Castle / Events / Portals / Swordsmith
     AutoInfinityCastle = false,
     CastleMatchmaking = true,
     CastleFloorMode = "Next Floor",
@@ -180,7 +216,7 @@ local Config = {
     CastleDifficulty = "Hard",
 
     AutoEventChallenge = false,
-    EventMatchmaking = true,        -- true = "Find Match", false = "Play Here"
+    EventMatchmaking = true,
     HuntBingoMaps = false,
     HuntUnwonWeathers = false,
 
@@ -611,6 +647,7 @@ local function StepLobbyJoinAndMatchmaking(rootGui)
 
     local activeMode = nil
     local useMatchmaking = true
+    local targetWorld = nil
 
     if Config.AutoEventChallenge then
         activeMode = "Summer Event"
@@ -621,12 +658,22 @@ local function StepLobbyJoinAndMatchmaking(rootGui)
     elseif Config.AutoMistyTower then
         activeMode = "Misty Village"
         useMatchmaking = Config.MistyMatchmaking
+    elseif Config.AutoJoinChallenge or Config.AutoJoinDailyChallenge then
+        activeMode = "Regular Stages"
+        useMatchmaking = Config.ChallengeMatchmaking
+    elseif Config.AutoJoinStory then
+        activeMode = "Regular Stages"
+        useMatchmaking = Config.StoryMatchmaking
+        targetWorld = (Config.JoinMode == "Legend") and Config.JoinLegendWorld or Config.JoinWorld
     elseif Config.AutoInfinityCastle then
         activeMode = "Regular Stages"
         useMatchmaking = Config.CastleMatchmaking
     elseif Config.AutoPortal then
         activeMode = "Regular Stages"
         useMatchmaking = Config.PortalMatchmaking
+    elseif Config.AutoDungeon then
+        activeMode = "Regular Stages"
+        useMatchmaking = Config.DungeonMatchmaking
     end
 
     if not activeMode then return end
@@ -643,6 +690,14 @@ local function StepLobbyJoinAndMatchmaking(rootGui)
         if confirmBtn then
             SafeClick(confirmBtn)
             return
+        end
+
+        if targetWorld then
+            local worldBtn = FindButtonByPhrase(targetWorld, rootGui)
+            if worldBtn then
+                SafeClick(worldBtn)
+                task.wait(0.25)
+            end
         end
 
         local modeBtn = FindButtonByPhrase(activeMode, rootGui)
@@ -664,7 +719,7 @@ local function StepLobbyJoinAndMatchmaking(rootGui)
 end
 
 -- ============================================================================
--- 6. BIGFROOT-INSPIRED BENTO UI (MATCHING HOME + ALL SIDEBAR TABS)
+-- 6. BIGFROOT-INSPIRED BENTO UI (HOME, MACRO, JOIN > STORY / CHALLENGES, ETC.)
 -- ============================================================================
 local SessionStart = os.clock()
 
@@ -707,7 +762,7 @@ local function BuildBentoHub()
     sg.Parent = guiParent
 
     -- Top Floating Watermark Pill
-    local topPill = Instance.new("TextButton")
+    local topPill = Instance.new("TextButton", sg)
     topPill.Name = "TopPill"
     topPill.Size = UDim2.new(0, 260, 0, 28)
     topPill.Position = UDim2.new(0.55, -130, 0, 8)
@@ -718,7 +773,6 @@ local function BuildBentoHub()
     topPill.Text = "  AA Unified  •  Tap to open, hold for stats"
     topPill.Active = true
     topPill.Draggable = true
-    topPill.Parent = sg
     Instance.new("UICorner", topPill).CornerRadius = UDim.new(1, 0)
     local pillStroke = Instance.new("UIStroke", topPill)
     pillStroke.Color = C_BORDER
@@ -732,8 +786,8 @@ local function BuildBentoHub()
 
     -- Main Window Shell
     local winW = IsMobile and 650 or 800
-    local winH = IsMobile and 375 or 485
-    local main = Instance.new("Frame")
+    local winH = IsMobile and 375 or 495
+    local main = Instance.new("Frame", sg)
     main.Name = "MainWindow"
     main.Size = UDim2.new(0, winW, 0, winH)
     main.Position = UDim2.new(0.5, -winW / 2, 0.5, -winH / 2)
@@ -741,7 +795,6 @@ local function BuildBentoHub()
     main.BorderSizePixel = 0
     main.Active = true
     main.Draggable = true
-    main.Parent = sg
     Instance.new("UICorner", main).CornerRadius = UDim.new(0, 14)
     local mainStroke = Instance.new("UIStroke", main)
     mainStroke.Color = C_BORDER
@@ -752,13 +805,12 @@ local function BuildBentoHub()
     end)
 
     -- ========================================================================
-    -- LEFT SIDEBAR (Logo Card, Main ⌄, All 9 Tabs, Other ⌄, User Footer)
+    -- LEFT SIDEBAR
     -- ========================================================================
-    local sidebar = Instance.new("Frame")
-    sidebar.Size = UDim2.new(0, 172, 1, 0)
+    local sidebar = Instance.new("Frame", main)
+    sidebar.Size = UDim2.new(0, 174, 1, 0)
     sidebar.BackgroundColor3 = C_SIDEBAR
     sidebar.BorderSizePixel = 0
-    sidebar.Parent = main
     Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 14)
 
     local brandRow = Instance.new("Frame", sidebar)
@@ -893,8 +945,8 @@ local function BuildBentoHub()
     -- TOP HEADER BAR & BENTO PAGE HOLDER
     -- ========================================================================
     local topBar = Instance.new("Frame", main)
-    topBar.Size = UDim2.new(1, -188, 0, 38)
-    topBar.Position = UDim2.new(0, 180, 0, 8)
+    topBar.Size = UDim2.new(1, -190, 0, 38)
+    topBar.Position = UDim2.new(0, 182, 0, 8)
     topBar.BackgroundTransparency = 1
 
     local breadcrumb = Instance.new("TextLabel", topBar)
@@ -926,8 +978,8 @@ local function BuildBentoHub()
     Instance.new("UIPadding", searchBox).PaddingLeft = UDim.new(0, 10)
 
     local pageHolder = Instance.new("Frame", main)
-    pageHolder.Size = UDim2.new(1, -188, 1, -54)
-    pageHolder.Position = UDim2.new(0, 180, 0, 48)
+    pageHolder.Size = UDim2.new(1, -190, 1, -54)
+    pageHolder.Position = UDim2.new(0, 182, 0, 48)
     pageHolder.BackgroundTransparency = 1
 
     local Pages = {}
@@ -1324,46 +1376,55 @@ local function BuildBentoHub()
     end
 
     -- ========================================================================
-    -- REGISTER PAGES & COMPLETE SIDEBAR (Matches Screenshot 17)
+    -- REGISTER PAGES & SIDEBAR TREE (Matches Screenshot 18)
     -- ========================================================================
-    local pgHome        = CreateBentoPage("Home", "Home", nil)
-    local pgMacroRec    = CreateBentoPage("MacroRecord", "Macro", "Record / Play")
-    local pgMacroMaps   = CreateBentoPage("MacroMaps", "Macro", "Macro Maps")
-    local pgAutoAll     = CreateBentoPage("AutoAll", "Auto Play", "All Modes")
-    local pgAutoEvent   = CreateBentoPage("AutoEvent", "Auto Play", "Event")
-    local pgJoinEvents  = CreateBentoPage("JoinEvents", "Join", "Castle / Events")
-    local pgJoinVillage = CreateBentoPage("JoinVillage", "Join", "Swordsmith")
-    local pgPriority    = CreateBentoPage("Priority", "Priority", nil)
-    local pgGame        = CreateBentoPage("Game", "Game", nil)
-    local pgLobby       = CreateBentoPage("Lobby", "Lobby", nil)
-    local pgWebhook     = CreateBentoPage("Webhook", "Webhook", nil)
-    local pgMisc        = CreateBentoPage("Misc", "Misc", nil)
+    local pgHome          = CreateBentoPage("Home", "Home", nil)
+    local pgMacroRec      = CreateBentoPage("MacroRecord", "Macro", "Record / Play")
+    local pgMacroMaps     = CreateBentoPage("MacroMaps", "Macro", "Macro Maps")
+    local pgAutoAll       = CreateBentoPage("AutoAll", "Auto Play", "All Modes")
+    local pgAutoEvent     = CreateBentoPage("AutoEvent", "Auto Play", "Event")
+
+    local pgJoinStory     = CreateBentoPage("JoinStory", "Join", "Story / Challenges")
+    local pgJoinParty     = CreateBentoPage("JoinParty", "Join", "Party")
+    local pgJoinEvents    = CreateBentoPage("JoinEvents", "Join", "Castle / Events")
+    local pgJoinDungeon   = CreateBentoPage("JoinDungeon", "Join", "Dungeon")
+    local pgJoinTeams     = CreateBentoPage("JoinTeams", "Join", "Teams")
+    local pgJoinVillage   = CreateBentoPage("JoinVillage", "Join", "Swordsmith")
+
+    local pgPriority      = CreateBentoPage("Priority", "Priority", nil)
+    local pgGame          = CreateBentoPage("Game", "Game", nil)
+    local pgLobby         = CreateBentoPage("Lobby", "Lobby", nil)
+    local pgWebhook       = CreateBentoPage("Webhook", "Webhook", nil)
+    local pgMisc          = CreateBentoPage("Misc", "Misc", nil)
 
     AddSidebarSectionHeader("Main")
-    AddSidebarNav("Home",        "⌂", "Home", false)
-    AddSidebarNav("Macro",       "⇄", "Macro", false, "MacroRecord")
-    AddSidebarNav("MacroRecord", "⇄", "Record / Play", true)
-    AddSidebarNav("MacroMaps",   "🗺", "Macro Maps", true)
-    AddSidebarNav("AutoPlay",    "🤖", "Auto Play", false, "AutoAll")
-    AddSidebarNav("AutoAll",     "🤖", "All Modes", true)
-    AddSidebarNav("AutoEvent",   "✦", "Event", true)
-    AddSidebarNav("Join",        "🚀", "Join", false, "JoinEvents")
-    AddSidebarNav("JoinEvents",  "👑", "Castle / Events", true)
-    AddSidebarNav("JoinVillage", "⚔", "Swordsmith", true)
-    AddSidebarNav("Priority",    "🏅", "Priority", false)
-    AddSidebarNav("Game",        "🎮", "Game", false)
-    AddSidebarNav("Lobby",       "🏪", "Lobby", false)
-    AddSidebarNav("Webhook",     "🔔", "Webhook", false)
-    AddSidebarNav("Misc",        "🔧", "Misc", false)
+    AddSidebarNav("Home",          "⌂", "Home", false)
+    AddSidebarNav("Macro",         "⇄", "Macro", false, "MacroRecord")
+    AddSidebarNav("MacroRecord",   "⇄", "Record / Play", true)
+    AddSidebarNav("MacroMaps",     "🗺", "Macro Maps", true)
+    AddSidebarNav("AutoPlay",      "🤖", "Auto Play", false, "AutoAll")
+    AddSidebarNav("AutoAll",       "🤖", "All Modes", true)
+    AddSidebarNav("AutoEvent",     "✦", "Event", true)
+
+    AddSidebarNav("Join",          "🚀", "Join", false, "JoinStory")
+    AddSidebarNav("JoinStory",     "🚀", "Story / Challenges", true)
+    AddSidebarNav("JoinParty",     "👤", "Party", true)
+    AddSidebarNav("JoinEvents",    "👑", "Castle / Events", true)
+    AddSidebarNav("JoinDungeon",   "💀", "Dungeon", true)
+    AddSidebarNav("JoinTeams",     "👥", "Teams", true)
+    AddSidebarNav("JoinVillage",   "⚔", "Swordsmith", true)
+
+    AddSidebarNav("Priority",      "🏅", "Priority", false)
+    AddSidebarNav("Game",          "🎮", "Game", false)
+    AddSidebarNav("Lobby",         "🏪", "Lobby", false)
+    AddSidebarNav("Webhook",       "🔔", "Webhook", false)
+    AddSidebarNav("Misc",          "🔧", "Misc", false)
     AddSidebarSectionHeader("Other")
 
     -- ========================================================================
-    -- PAGE 1: HOME (Exact Layout from Image 17)
-    -- Left: Announcements (v1.3.2 + divider + v1.3.1) + Quick actions (5 buttons)
-    -- Right: Status (6 tiles) + Stats (3 tiles) + Account (Key status + Replace key)
+    -- PAGE 1: HOME
     -- ========================================================================
     local annCard = CreateBentoCard(pgHome.Left, "🔔", "Announcements")
-
     local rel1Title = Instance.new("TextLabel", annCard)
     rel1Title.Size = UDim2.new(1, 0, 0, 16)
     rel1Title.BackgroundTransparency = 1
@@ -1427,7 +1488,6 @@ local function BuildBentoHub()
     rel2Notes.TextSize = 11
     rel2Notes.Text = "+ Fixed Auto Place Defenses\n+ Fixed traps stalling at the base\n+ Fixed slow Misty Tower joins\n+ Fixed Auto Repair on broken defenses"
 
-    -- Quick actions card (2x2 grid + full-width Toggle watermark button)
     local quickCard = CreateBentoCard(pgHome.Left, "⚡", "Quick actions")
     local qGrid = Instance.new("Frame", quickCard)
     qGrid.Size = UDim2.new(1, 0, 0, 66)
@@ -1458,7 +1518,6 @@ local function BuildBentoHub()
     end)
     wmBtn.Size = UDim2.new(1, 0, 0, 29)
 
-    -- Right Column: Status (6 tiles)
     local statusCard = CreateBentoCard(pgHome.Right, "🕒", "Status")
     local statusGrid = Instance.new("Frame", statusCard)
     statusGrid.Size = UDim2.new(1, 0, 0, 96)
@@ -1499,7 +1558,6 @@ local function BuildBentoHub()
     local mPlayers = MakeMetricTile(statusGrid, tostring(#Players:GetPlayers()) .. "/30", "players")
     local mKey     = MakeMetricTile(statusGrid, "lifetime", "key time")
 
-    -- Right Column: Stats (3 tiles)
     local statsCard = CreateBentoCard(pgHome.Right, "📊", "Stats")
     local statsGrid = Instance.new("Frame", statsCard)
     statsGrid.Size = UDim2.new(1, 0, 0, 46)
@@ -1511,7 +1569,6 @@ local function BuildBentoHub()
     local mWave  = MakeMetricTile(statsGrid, "0", "Wave")
     local mSteps = MakeMetricTile(statsGrid, "0", "Macro Steps")
 
-    -- Right Column: Account card (Key status: Free + Replace key)
     local acctCard = CreateBentoCard(pgHome.Right, "🔑", "Account")
     local keyRow = Instance.new("Frame", acctCard)
     keyRow.Size = UDim2.new(1, 0, 0, 18)
@@ -1942,18 +1999,107 @@ local function BuildBentoHub()
     tHill   = AddToggle(unitSpecCard, "Place On Hill", Config.UnitSlots[Config.SelectedUnitSlot].OnHill, function(v) Config.UnitSlots[Config.SelectedUnitSlot].OnHill = v end)
 
     -- ========================================================================
-    -- PAGE 6 & 7: JOIN (Castle / Events / Portals / Swordsmith)
+    -- PAGE 6: JOIN > STORY / CHALLENGES (Matches Screenshot 18 Exactly)
+    -- Left Card: Auto Join (Mode, World, Legend World, Act / Stage, Difficulty, Matchmaking)
+    -- Right Card: Challenges (Auto Join Challenge, Daily Challenge, Matchmaking, Filters, Live Info)
     -- ========================================================================
+    local ajCard = CreateBentoCard(pgJoinStory.Left, "🚀", "Auto Join")
+    AddToggle(ajCard, "Auto Join", Config.AutoJoinStory, function(v) Config.AutoJoinStory = v end)
+
+    AddFieldLabel(ajCard, "Mode")
+    AddDropdownBox(ajCard, { "Story", "Legend", "Infinite" }, Config.JoinMode, function(v)
+        Config.JoinMode = v
+    end)
+
+    AddFieldLabel(ajCard, "World")
+    AddDropdownBox(ajCard, STORY_MAPS, Config.JoinWorld, function(v)
+        Config.JoinWorld = v
+    end)
+
+    AddFieldLabel(ajCard, "Legend World")
+    AddDropdownBox(ajCard, LEGEND_MAPS, Config.JoinLegendWorld, function(v)
+        Config.JoinLegendWorld = v
+    end)
+
+    AddFieldLabel(ajCard, "Act / Stage")
+    AddDropdownBox(ajCard, { "1", "2", "3", "4", "5", "6" }, Config.JoinAct, function(v)
+        Config.JoinAct = v
+    end)
+
+    AddFieldLabel(ajCard, "Difficulty")
+    AddDropdownBox(ajCard, { "Normal", "Hard", "Nightmare" }, Config.JoinDifficulty, function(v)
+        Config.JoinDifficulty = v
+    end)
+
+    AddToggle(ajCard, "Matchmaking", Config.StoryMatchmaking, function(v)
+        Config.StoryMatchmaking = v
+    end)
+
+    local chCard = CreateBentoCard(pgJoinStory.Right, "⚔", "Challenges")
+    AddToggle(chCard, "Auto Join Challenge", Config.AutoJoinChallenge, function(v)
+        Config.AutoJoinChallenge = v
+    end)
+    AddToggle(chCard, "Auto Join Daily Challenge", Config.AutoJoinDailyChallenge, function(v)
+        Config.AutoJoinDailyChallenge = v
+    end)
+    AddToggle(chCard, "Matchmaking", Config.ChallengeMatchmaking, function(v)
+        Config.ChallengeMatchmaking = v
+    end)
+
+    AddFieldLabel(chCard, "Only If It Drops (blank = any)")
+    AddDropdownBox(chCard, { "--", "Star Fruit", "Star Fruit (Red)", "Star Fruit (Green)", "Star Remnant (Limited)", "Divine Wish", "Stat Cube", "Gems" }, Config.ChallengeDropFilter, function(v)
+        Config.ChallengeDropFilter = v
+    end)
+
+    AddFieldLabel(chCard, "Skip Modifiers")
+    AddDropdownBox(chCard, { "--", "Shield Enemies", "Regen Enemies", "Fast Enemies", "Explosive Enemies", "High Cost" }, Config.ChallengeSkipModifiers, function(v)
+        Config.ChallengeSkipModifiers = v
+    end)
+
+    local chFeed = Instance.new("TextLabel", chCard)
+    chFeed.Size = UDim2.new(1, 0, 0, 96)
+    chFeed.BackgroundTransparency = 1
+    chFeed.TextWrapped = true
+    chFeed.TextXAlignment = Enum.TextXAlignment.Left
+    chFeed.TextYAlignment = Enum.TextYAlignment.Top
+    chFeed.TextColor3 = C_SUBTEXT
+    chFeed.Font = Enum.Font.Gotham
+    chFeed.TextSize = 11
+    chFeed.Text = "Challenge: Space Center Act 3 · Shield Enemies · not cleared  (00:52 left)\n  Star Fruit (Red), Star Fruit (Green), Star Fruit, Gems\nDaily: Haunted Mansion · Regen Enemies · not cleared  (5:00:52 left)\n  Divine Wish, Star Remnant (Limited), Stat Cube, Perfect Stat Cube, Gems"
+
+    -- ========================================================================
+    -- PAGES 7-11: PARTY, CASTLE / EVENTS, DUNGEON, TEAMS, SWORDSMITH
+    -- ========================================================================
+    local partyCard = CreateBentoCard(pgJoinParty.Left, "👤", "Party Join")
+    AddToggle(partyCard, "Auto Join Party", Config.AutoJoinParty, function(v) Config.AutoJoinParty = v end)
+    AddFieldLabel(partyCard, "Party Code")
+    local partyBox = Instance.new("TextBox", partyCard)
+    partyBox.Size = UDim2.new(1, 0, 0, 30)
+    partyBox.BackgroundColor3 = C_INPUT
+    partyBox.TextColor3 = C_TEXT
+    partyBox.PlaceholderText = "enter party code..."
+    partyBox.PlaceholderColor3 = C_SUBTEXT
+    partyBox.Text = Config.PartyCode
+    partyBox.Font = Enum.Font.Gotham
+    partyBox.TextSize = 11
+    partyBox.ClearTextOnFocus = false
+    Instance.new("UICorner", partyBox).CornerRadius = UDim.new(0, 7)
+    Instance.new("UIPadding", partyBox).PaddingLeft = UDim.new(0, 10)
+    partyBox.FocusLost:Connect(function()
+        Config.PartyCode = partyBox.Text
+        SaveConfig()
+    end)
+
     local icCard = CreateBentoCard(pgJoinEvents.Left, "👑", "Infinity Castle")
     AddToggle(icCard, "Auto Infinity Castle", Config.AutoInfinityCastle, function(v) Config.AutoInfinityCastle = v end)
-    AddToggle(icCard, "Matchmaking (OFF = Play Here)", Config.CastleMatchmaking, function(v) Config.CastleMatchmaking = v end)
+    AddToggle(icCard, "Matchmaking", Config.CastleMatchmaking, function(v) Config.CastleMatchmaking = v end)
     AddDropdownBox(icCard, { "Next Floor", "Fixed Floor" }, Config.CastleFloorMode, function(v) Config.CastleFloorMode = v end)
     AddSlider(icCard, "Fixed Floor", 1, 100, Config.CastleFixedFloor, "", function(v) Config.CastleFixedFloor = v end)
     AddDropdownBox(icCard, { "Normal", "Hard", "Nightmare" }, Config.CastleDifficulty, function(v) Config.CastleDifficulty = v end)
 
     local ecCard = CreateBentoCard(pgJoinEvents.Right, "☆", "Event Challenge (Summer Hunt)")
     AddToggle(ecCard, "Auto Join Event Challenge", Config.AutoEventChallenge, function(v) Config.AutoEventChallenge = v end)
-    AddToggle(ecCard, "Matchmaking (OFF = Play Here)", Config.EventMatchmaking, function(v) Config.EventMatchmaking = v end)
+    AddToggle(ecCard, "Matchmaking", Config.EventMatchmaking, function(v) Config.EventMatchmaking = v end)
     AddToggle(ecCard, "Hunt Bingo Maps", Config.HuntBingoMaps, function(v) Config.HuntBingoMaps = v end)
     AddToggle(ecCard, "Hunt Unwon Weathers", Config.HuntUnwonWeathers, function(v) Config.HuntUnwonWeathers = v end)
 
@@ -1962,22 +2108,29 @@ local function BuildBentoHub()
     AddToggle(portCard, "Auto Start Portal", Config.AutoStartPortal, function(v) Config.AutoStartPortal = v end)
     AddToggle(portCard, "Auto Next Portal", Config.AutoNextPortal, function(v) Config.AutoNextPortal = v end)
     AddToggle(portCard, "Most Uses Left First", Config.MostUsesLeftFirst, function(v) Config.MostUsesLeftFirst = v end)
-    AddToggle(portCard, "Matchmaking (OFF = Play Here)", Config.PortalMatchmaking, function(v) Config.PortalMatchmaking = v end)
+    AddToggle(portCard, "Matchmaking", Config.PortalMatchmaking, function(v) Config.PortalMatchmaking = v end)
+
+    local dngCard = CreateBentoCard(pgJoinDungeon.Left, "💀", "Dungeon")
+    AddToggle(dngCard, "Auto Join Dungeon", Config.AutoDungeon, function(v) Config.AutoDungeon = v end)
+    AddToggle(dngCard, "Matchmaking", Config.DungeonMatchmaking, function(v) Config.DungeonMatchmaking = v end)
+
+    local tmCard = CreateBentoCard(pgJoinTeams.Left, "👥", "Teams")
+    AddToggle(tmCard, "Auto Equip Best Team", Config.AutoEquipBestTeam, function(v) Config.AutoEquipBestTeam = v end)
 
     local swCard = CreateBentoCard(pgJoinVillage.Left, "⚔", "Swordsmith Village")
     AddToggle(swCard, "Auto Swordsmith Village", Config.AutoSwordsmith, function(v) Config.AutoSwordsmith = v end)
-    AddToggle(swCard, "Matchmaking (OFF = Play Here)", Config.SwordsmithMatchmaking, function(v) Config.SwordsmithMatchmaking = v end)
+    AddToggle(swCard, "Matchmaking", Config.SwordsmithMatchmaking, function(v) Config.SwordsmithMatchmaking = v end)
     AddDropdownBox(swCard, { "Best Available", "Day Stage", "Night Stage" }, Config.SwordsmithStage, function(v) Config.SwordsmithStage = v end)
     AddToggle(swCard, "Blood Moon When Up", Config.BloodMoonWhenUp, function(v) Config.BloodMoonWhenUp = v end)
     AddSlider(swCard, "Skip A Stage After Losses", 0, 10, Config.SkipStageAfterLosses, "", function(v) Config.SkipStageAfterLosses = v end)
 
     local mtCard = CreateBentoCard(pgJoinVillage.Right, "☰", "Misty Tower")
     AddToggle(mtCard, "Auto Misty Tower", Config.AutoMistyTower, function(v) Config.AutoMistyTower = v end)
-    AddToggle(mtCard, "Matchmaking (OFF = Play Here)", Config.MistyMatchmaking, function(v) Config.MistyMatchmaking = v end)
+    AddToggle(mtCard, "Matchmaking", Config.MistyMatchmaking, function(v) Config.MistyMatchmaking = v end)
     AddSlider(mtCard, "Rest After Losses", 0, 10, Config.RestAfterLosses, "", function(v) Config.RestAfterLosses = v end)
 
     -- ========================================================================
-    -- PAGES 8-12: PRIORITY, GAME, LOBBY, WEBHOOK, MISC
+    -- PAGES 12-16: PRIORITY, GAME, LOBBY, WEBHOOK, MISC
     -- ========================================================================
     local prCard = CreateBentoCard(pgPriority.Left, "🏅", "Target Priority")
     AddToggle(prCard, "Target Boss First", Config.TargetBossFirst, function(v) Config.TargetBossFirst = v end)
@@ -2009,8 +2162,7 @@ local function BuildBentoHub()
         end
     end)
 
-    -- Open directly to Home (matching screenshot 17)
-    SelectPage("Home")
+    SelectPage("JoinStory")
 
     -- Live Telemetry Loop
     local frames = 0
